@@ -1,0 +1,6 @@
+key: demo
+goal_type: reach
+stakes: low
+success_metric: reach
+target_lens_set: [plain]
+requires_ai_disclosure: false

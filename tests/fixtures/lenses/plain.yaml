@@ -1,0 +1,4 @@
+key: plain
+tone: "neutral, direct"
+structure: ["hook", "point", "cta"]
+applies_to: [reel, post]
