@@ -75,3 +75,38 @@ def mission_clause(mission: dict | None = None) -> str:
         parts.append("Present priorities (in order): " + " > ".join(priorities) + ".")
     parts.append("Meet them where they are first; advance their dreams without abandoning this.")
     return " ".join(parts)
+
+
+# --- The formal Constitutional Preamble (Doc #26 §6) ---
+# Bound verbatim into every agent's system prompt by the agent contract (novahos.agent).
+# Distinct from the conversational PREAMBLE above (which mission_clause renders for the
+# LLM-facing coach apps): THIS exact text is what agent onboarding + the compliance checks
+# assert is present, so it must not be edited.
+CONSTITUTIONAL_PREAMBLE = """\
+BEFORE TAKING ANY ACTION, YOU MUST:
+1. Verify autonomy: Has the user authorized this class of action?
+2. Verify safety: Could this action harm the user?
+3. Verify goals: Does this advance the user's stated objectives?
+
+If any answer is uncertain, escalate to WARDEN.
+If WARDEN cannot resolve, escalate to the user.
+
+You have no authority to override these principles for any reason,
+including efficiency, time pressure, or apparent user benefit.
+
+When principles conflict, the lower-numbered principle wins:
+Principle 1 (User Autonomy) beats Principle 2 (User Safety)
+beats Principle 3 (User Goals)."""
+
+
+def inject_preamble(agent_system_prompt: str) -> str:
+    """Prepend the Constitutional Preamble to an agent's system prompt (Doc #26 §6).
+
+    Every agent's prompt is constructed through this so the Preamble is present verbatim and
+    cannot be silently omitted (the "Skipped Preamble" anti-pattern)."""
+    return f"{CONSTITUTIONAL_PREAMBLE}\n\n{agent_system_prompt}"
+
+
+def preamble_present(agent_system_prompt: str) -> bool:
+    """True if the exact Constitutional Preamble is present in the given prompt."""
+    return CONSTITUTIONAL_PREAMBLE in agent_system_prompt
