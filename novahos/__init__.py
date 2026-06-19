@@ -16,7 +16,7 @@ deps only when you import them, and are declared as install extras in pyproject.
 Back-compat: the separate `leadfuel_core` shim package re-exports the rails + foundation
 modules under their old import paths, so existing apps keep working unchanged.
 """
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # Convenience: the stdlib modules are safe to surface eagerly (no heavy imports).
 from . import (  # noqa: F401

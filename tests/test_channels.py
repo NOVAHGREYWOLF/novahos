@@ -7,6 +7,7 @@ from novahos.channels.instagram.assisted import InstagramAssisted
 from novahos.channels.instagram.autonomous import InstagramAutonomous
 from novahos.channels.instagram.official import InstagramOfficial
 from novahos.channels.linkedin import LinkedInBackend
+from novahos.channels.twitter import TwitterBackend
 from novahos.context import AgentContext
 
 
@@ -26,8 +27,32 @@ def test_registry_resolves_instagram_modes():
     assert isinstance(registry.resolve(_ctx(mode="autonomous")), InstagramAutonomous)
 
 
-def test_registry_resolves_other_channel():
+def test_registry_resolves_other_channels():
     assert isinstance(registry.resolve(_ctx(channel="linkedin")), LinkedInBackend)
+    assert isinstance(registry.resolve(_ctx(channel="twitter")), TwitterBackend)
+
+
+def test_linkedin_twitter_capabilities():
+    assert LinkedInBackend().supports("publish_post") and LinkedInBackend().supports("read_insights")
+    assert TwitterBackend().supports("publish_post")
+
+
+@pytest.mark.asyncio
+async def test_linkedin_dry_run_without_token():
+    res = await LinkedInBackend().publish(
+        AccountRef(id="1", handle="x", channel="linkedin", auth={}), MediaRef(kind="post"),
+        "hello world", kind="post")
+    assert res.status == "dry_run"
+
+
+@pytest.mark.asyncio
+async def test_twitter_dry_run_and_length_guard():
+    tw = TwitterBackend()
+    acc = AccountRef(id="1", handle="x", channel="twitter", auth={})
+    ok = await tw.publish(acc, MediaRef(kind="post"), "short tweet", kind="post")
+    assert ok.status == "dry_run"
+    toolong = await tw.publish(acc, MediaRef(kind="post"), "z" * 281, kind="post")
+    assert toolong.status == "failed"
 
 
 def test_context_exposes_compliance_mode():

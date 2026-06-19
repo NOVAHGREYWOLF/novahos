@@ -11,6 +11,7 @@ from .instagram.assisted import InstagramAssisted
 from .instagram.autonomous import InstagramAutonomous
 from .instagram.official import InstagramOfficial
 from .linkedin import LinkedInBackend
+from .twitter import TwitterBackend
 
 _REGISTRY: dict[str, dict[str, type[ChannelBackend]]] = {
     "instagram": {
@@ -19,6 +20,7 @@ _REGISTRY: dict[str, dict[str, type[ChannelBackend]]] = {
         "autonomous": InstagramAutonomous,
     },
     "linkedin": {"_": LinkedInBackend},
+    "twitter": {"_": TwitterBackend},
 }
 _CACHE: dict[tuple[str, str], ChannelBackend] = {}
 
