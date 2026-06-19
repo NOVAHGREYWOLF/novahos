@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "novahos"
-version = "0.3.0"
+version = "0.4.0"
 description = "The NovahOS kernel — rails (service mesh + knowledge) + foundation (constitution/consent/privacy/warden/validators/mcp) + shared agents + channels. One foundation every NOVAH app runs on."
 requires-python = ">=3.11"
 dependencies = []  # the rails + foundation are stdlib-only; heavy layers are extras.
@@ -20,8 +20,10 @@ substrate = [
     "httpx>=0.27",
     "pyyaml>=6.0",
 ]
-# Channels: posting backends.
+# Channels: posting backends (outbound).
 channels = ["httpx>=0.27"]
+# Sources: inbound connector backends (the mirror of channels).
+sources = ["httpx>=0.27"]
 # Agents: shared agents need the substrate + channels.
 agents = [
     "sqlalchemy[asyncio]>=2.0",

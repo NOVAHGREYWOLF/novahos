@@ -3,15 +3,21 @@
 The same agent writes an Instagram caption, a LinkedIn post, or an email body — ctx.channel +
 ctx.playbook + ctx.lenses + ctx.voice decide the output. One draft VARIANT per lens (each a
 bandit arm). LLM reasoning lives here, never in WARDEN.
+
+Two entry points:
+  - `compose(ctx, transcript)` → list[dict]  — PURE (no DB). The shared composition brain, usable
+     by any app regardless of its database (NovaHound stores results in its own `posts`; the IG app
+     persists via `generate`).
+  - `generate(db, ctx, ...)` → list[ContentDraft] — composes then persists to the kernel's models.
 """
 from __future__ import annotations
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ... import llm
 from ...constitution import mission_clause
 from ...context import AgentContext
-from ...models import ContentDraft
+
+# NOTE: `compose()` is pure (LLM + context only) and imports nothing heavy, so any app can call it
+# without SQLAlchemy. The DB-backed `generate()` imports the models lazily, when actually used.
 
 _SYSTEM = (
     mission_clause()
@@ -49,29 +55,36 @@ def _fallback(transcript: str) -> dict:
     return {"body": head or "New drop.", "hooks": [head or "Watch this"], "tags": [], "cta": ""}
 
 
-async def generate(
-    db: AsyncSession,
-    ctx: AgentContext,
-    *,
-    content_piece_id: str,
-    transcript: str,
-    summary: str | None = None,
-) -> list[ContentDraft]:
+async def compose(ctx: AgentContext, transcript: str, summary: str | None = None) -> list[dict]:
+    """Pure composition — one draft dict per lens. No DB. Returns
+    [{variant_key, lens_key, body, hooks, tags, cta}, ...]."""
     lenses = ctx.lenses or {"educational": {"key": "educational"}}
-    drafts: list[ContentDraft] = []
-
+    out: list[dict] = []
     for lens_key, lens in lenses.items():
         try:
             data = llm.parse_json(await llm.reason(_SYSTEM, _prompt(ctx, transcript, lens, summary)))
         except Exception:
             data = _fallback(transcript)
+        out.append({
+            "variant_key": f"lens:{lens_key}", "lens_key": lens_key,
+            "body": data.get("body", ""), "hooks": data.get("hooks", []),
+            "tags": data.get("tags", []), "cta": data.get("cta", ""),
+        })
+    return out
+
+
+async def generate(db, ctx: AgentContext, *, content_piece_id: str,
+                   transcript: str, summary: str | None = None) -> list:
+    """Compose, then persist one ContentDraft per variant to the kernel's models."""
+    from ...models import ContentDraft  # lazy — only the DB path needs SQLAlchemy
+
+    drafts = []
+    for d in await compose(ctx, transcript, summary):
         draft = ContentDraft(
-            user_id=ctx.user_id, content_piece_id=content_piece_id, variant_key=f"lens:{lens_key}",
-            body=data.get("body", ""), hooks=data.get("hooks", []),
-            tags=data.get("tags", []), cta=data.get("cta", ""), lens_key=lens_key,
+            user_id=ctx.user_id, content_piece_id=content_piece_id, variant_key=d["variant_key"],
+            body=d["body"], hooks=d["hooks"], tags=d["tags"], cta=d["cta"], lens_key=d["lens_key"],
         )
         db.add(draft)
         drafts.append(draft)
-
     await db.flush()
     return drafts
