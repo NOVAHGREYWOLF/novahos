@@ -180,24 +180,27 @@ Each batch: **Goal · What · Where · Builds on · Outcome.**
 
 ## Progress log
 
-### Batch 1 — foundation consolidation (IN PROGRESS, via PR workflow)
-`novahos` is being consolidated through PRs (not direct-to-main). Current `origin/main`:
-- ✅ merged **#1** — `sources/` inbound layer + CROESUS finance agent + capability manifest (v0.4.0)
-- ✅ merged **#2** — hash-chained `AuditTrail` (Phase 1 — fold NovahPrime foundation into the kernel)
-- 🔵 branch **`warden-runtime-gate`** — the deeper WARDEN runtime gate (per `WARDEN_RECONCILIATION.md`), not yet merged
-- 🔵 branch **`batch1a-memory-data`** — shared `novahos.memory` (working/episodic/semantic) + `novahos.data`
-  (lifecycle/inference), additive + verified (existing `warden/privacy/consent` API intact). Awaiting merge.
-- ⬜ **still missing on the kernel:** `novahos.auth` (3-factor/tiered), `novahos.agent` (base/manifest/
-  registry/onboarding), `novahos.reasoning` (provider seam).
+### Batch 1 — foundation consolidation (ESSENTIALLY DONE — pause RESOLVED 2026-06-21)
+`novahos` was consolidated through PRs. Current `origin/main` (`9b0180a`, PR #4) has merged the
+runtime WARDEN 8-step gate + 6 validators, hash-chained `AuditTrail`, `novahos.memory`
+(working/episodic/semantic), `novahos.data` (lifecycle/inference), the **`novahos.agent`** contract
+(base/manifest/registry/onboarding), AND the **`novahos.reasoning`** provider seam. 70+ foundation
+tests pass; the local tree is byte-identical to `origin/main` — **the "divergent tree" pause condition
+is RESOLVED** (verified by the 2026-06-21 source audit, which corrected the stale "missing agent/reasoning").
+- ✅ `#1` — `sources/` inbound layer + CROESUS + capability manifest (v0.4.0)
+- ✅ `#2` — hash-chained `AuditTrail`
+- ✅ `#4` (`9b0180a`) — runtime WARDEN + memory + data + **agent** + **reasoning** (the bulk of Batch 1)
+- ✅ branch **`batch1/auth-mcp-port`** — the LAST two pieces: **`novahos.auth`** (tiered 3-factor + cooling +
+  continuous behavioral + recovery friction; `AuthState` is a real drop-in for `StaticAuthStateProvider`)
+  and the real **`novahos.mcp` boundary + credential vault** (approved-server allowlist, per-call audit,
+  Tier-1-never-to-cloud, stdlib encrypt-then-MAC vault injectable for AES-GCM). +16 tests (86 kernel total).
+- 🗑 stale branches `warden-runtime-gate` + `batch1a-memory-data` are SUPERSEDED (their content landed via
+  #4) — safe to delete; they were falsely signaling phantom unmerged work.
 
-**⏸ PAUSED (founder, 2026-06-16):** reconcile `novahos` before more foundation porting — don't build on a
-divergent tree.
+**Remaining for Batch 1:** merge `batch1/auth-mcp-port`; then **Batch 1d** — prove the kernel end-to-end
+against ONE spoke (Echo): replace Echo's `guard.py` with the kernel WARDEN, gate a real `/compose`, confirm
+an audit entry. (An AES-GCM vault is an optional injectable backend behind `CredentialVault`, NOT required
+in the stdlib-clean core.)
 
-### Roadmap / hygiene (do LATER, only when safe)
-- **Reconcile the local `novahos` working tree to `origin`.** The local checkout has untracked copies of
-  files already committed on origin (`warden_runtime/`, `sources/`, `audit_trail.py`, `docs/`, tests).
-  Clean it (`fetch` → confirm everything is committed/pushed → `reset --hard origin/main` + remove stale
-  untracked) **only once we're certain no uncommitted WIP would be lost.** Until then, treat `origin/main`
-  as the source of truth and work via branches/PRs, not the local tree.
-- Then resume Batch 1: merge `warden-runtime-gate` + `batch1a-memory-data`; port the remaining gaps
-  (`auth`, `agent`, `reasoning`) as PR branches; then Batch 1d (prove the kernel against Echo).
+> The 2026-06-16 PAUSE ("reconcile before more porting; don't build on a divergent tree") is **satisfied**:
+> local == origin, 86 tests pass. Batch 1 is effectively complete pending the auth/mcp PR + Batch 1d.

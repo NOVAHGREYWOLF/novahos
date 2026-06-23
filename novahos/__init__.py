@@ -2,7 +2,7 @@
 
 Layered so apps take only what they need:
   • rails       service_auth · service_client · knowledge        (stdlib)
-  • foundation  constitution · consent · privacy · warden · validators · mcp · context  (stdlib)
+  • foundation  constitution · consent · privacy · warden · validators · mcp · context · auth  (stdlib)
   • substrate   config · db · models · events · llm · learning · content_learning ·
                 suite_mesh · warden_gate · warden_audit                 (extras: novahos[substrate])
   • agents      apollo · ig · athena  (AgentContext-driven)            (extras: novahos[agents])
@@ -20,6 +20,7 @@ __version__ = "0.4.0"
 
 # Convenience: the stdlib modules are safe to surface eagerly (no heavy imports).
 from . import (  # noqa: F401
+    auth,
     constitution,
     consent,
     context,
@@ -34,5 +35,5 @@ from . import (  # noqa: F401
 
 __all__ = [
     "service_auth", "service_client", "knowledge",
-    "constitution", "consent", "privacy", "warden", "validators", "mcp", "context",
+    "constitution", "consent", "privacy", "warden", "validators", "mcp", "context", "auth",
 ]
