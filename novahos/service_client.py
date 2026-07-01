@@ -25,6 +25,36 @@ class ServiceError(Exception):
     """Raised when a cross-app call can't be made or returns an error status."""
 
 
+def _mesh_token(target_app: str, token_env: str) -> str:
+    """The token this service PRESENTS on an outbound mesh call — per-spoke aware,
+    so kernel-mediated calls keep working after the legacy shared token is retired.
+
+    Resolution order:
+      1. token_env (the explicit per-call env, default LEADFUEL_SERVICE_TOKEN) when
+         set — byte-identical to the legacy behavior whenever that env exists.
+      2. Calling the HUB → this service's OWN per-spoke token. A spoke's env holds
+         exactly its own SERVICE_TOKEN_<SELF> plus SERVICE_TOKEN_HUB (kept to
+         RECOGNISE the hub inbound), so excluding HUB leaves precisely the self
+         token — and the hub attributes the call to the right spoke.
+      3. Calling a SPOKE → SERVICE_TOKEN_HUB. Post-migration every spoke recognises
+         the hub's token (it is the one non-self token in every spoke's env), so it
+         is the universally-accepted outbound credential for hub→spoke and
+         spoke→spoke calls alike.
+    Returns "" when nothing is configured (caller raises with a helpful message)."""
+    tok = (os.environ.get(token_env) or "").strip()
+    if tok:
+        return tok
+    if target_app == "hub":
+        own = {k: (v or "").strip() for k, v in os.environ.items()
+               if k.startswith("SERVICE_TOKEN_") and (v or "").strip()
+               and k != "SERVICE_TOKEN_HUB"}
+        if len(own) == 1:
+            return next(iter(own.values()))
+        # Ambiguous (e.g. running ON the hub, which holds every spoke's token):
+        # fall through to the hub's own token so the call still authenticates.
+    return (os.environ.get("SERVICE_TOKEN_HUB") or "").strip()
+
+
 def base_url(app: str) -> str:
     env = APP_URL_ENV.get(app)
     if not env:
@@ -37,9 +67,10 @@ def call(app: str, path: str, *, method: str = "GET", params: dict | None = None
     base = base_url(app)
     if not base:
         raise ServiceError(f"{app} API URL not configured ({APP_URL_ENV[app]})")
-    token = (os.environ.get(token_env) or "").strip()
+    token = _mesh_token(app, token_env)
     if not token:
-        raise ServiceError(f"no service token configured ({token_env})")
+        raise ServiceError(
+            f"no service token configured ({token_env}, SERVICE_TOKEN_<SELF> or SERVICE_TOKEN_HUB)")
 
     url = base + path
     if params:
