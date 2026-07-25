@@ -15,7 +15,7 @@ TOKEN_ENV = "LEADFUEL_SERVICE_TOKEN"
 
 def _hub() -> str:
     return (os.environ.get("HUB_API_URL") or os.environ.get("NOVAHUB_URL")
-            or "https://novahub.leadfuel.cloud").rstrip("/")
+            or "https://leadfuel.cloud").rstrip("/")
 
 
 async def identity(user_email: str, provider: str) -> dict | None:
