@@ -34,7 +34,7 @@
 |---|---|---|
 | **novahub** | NOVA-PRIME (console/orchestrator), HERALD, LIBRARIAN | live; holds the brain (knowledge/memory/model) + identity + billing |
 | **echo** | **NOVAH (the Prime twin)**, MIRROR, VOICEWATCH | live; voice+identity capture, compose, verifier, autonomy; on the mesh |
-| **novahawk** | SENTINEL, IRIS, HERMES, ORACLE | live; email relationship intelligence |
+| **novahawk** | IRIS, SCRIBE, COURIER, ORACLE | live; email relationship intelligence (Batch 2 reconciled the census: canonical SENTINEL=Security/HERMES=Files belong to other domains → declared the comms cluster instead; see novahawk APP_MANIFEST.md) |
 | **smarticp** | CROESUS, PROSPECT, APOLLO | live; the ICP "profile brain" producer |
 | **lucid** | ATHENA, COACH, MENTOR, PATHFINDER, SCHEDULER | live; personal+work coach |
 | **novaherald** | COURIER, HERALD, PROSPECT | skeleton; outbound campaigns |
