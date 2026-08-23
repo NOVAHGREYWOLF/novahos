@@ -63,6 +63,13 @@ async def compose(ctx: AgentContext, transcript: str, summary: str | None = None
     for lens_key, lens in lenses.items():
         try:
             data = llm.parse_json(await llm.reason(_SYSTEM, _prompt(ctx, transcript, lens, summary)))
+        except (llm.GatewayNotConfigured, llm.GatewayMisconfigured):
+            # A closed door is not a bad answer from the model — it is no answer, because we
+            # deliberately did not ask. Falling back here would hand the caller a transcript
+            # stub that LOOKS like a draft: novahound publishes whatever compose() returns, so
+            # the silent path ends with fallback prose on someone's Instagram and an operator
+            # with no reason to suspect the brain never ran. Let it out.
+            raise
         except Exception:
             data = _fallback(transcript)
         out.append({

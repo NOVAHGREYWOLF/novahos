@@ -34,6 +34,10 @@ async def rank_dicts(ctx: AgentContext, drafts: list[dict]) -> dict:
         ranking = [int(i) for i in (data.get("ranking") or [0]) if 0 <= int(i) < len(drafts)]
         idx = ranking[0] if ranking else 0
         return {"index": idx, "ranking": ranking or [0], "reason": data.get("reason", "")}
+    except (llm.GatewayNotConfigured, llm.GatewayMisconfigured):
+        # "reason": "default" is an honest label for a model that answered badly and a lie for
+        # a model that was never asked. The refusal is the information; propagate it.
+        raise
     except Exception:
         return {"index": 0, "ranking": [0], "reason": "default"}
 

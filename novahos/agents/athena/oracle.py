@@ -16,5 +16,10 @@ async def content_angles(account_email: str, since: str | None = None) -> list[s
               'Return JSON: {"angles": ["angle 1", "angle 2", ...]}')
     try:
         return list(llm.parse_json(await llm.reason(_SYSTEM, prompt)).get("angles", []))
+    except (llm.GatewayNotConfigured, llm.GatewayMisconfigured):
+        # `[]` already means "no angles worth suggesting" on the line above, when there were no
+        # signals. Reusing it for "the door out is shut" would make a configuration failure
+        # indistinguishable from a quiet week.
+        raise
     except Exception:
         return []

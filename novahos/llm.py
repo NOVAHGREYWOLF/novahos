@@ -3,6 +3,69 @@
 `reason()` = Opus-tier; `classify()` = cheap Haiku-tier. Nothing in the foundation imports
 this — WARDEN stays deterministic.
 
+THE ONE DOOR OUT (THE_DOOR.md law 9)
+────────────────────────────────────
+Every cloud model call below is pinned, PER CALL, to novahub's gateway — which runs the human
+spend approval, the daily ceiling and the metered row before anything reaches a vendor — and
+RAISES when the gateway is unconfigured. It never falls back to calling a vendor directly.
+
+WHY A LIBRARY NEEDS THIS MORE THAN A SERVICE DOES, NOT LESS. Grep this repo for
+ANTHROPIC_API_KEY and you find nothing — not one occurrence, in any file. That reads like
+safety and is the opposite of it. litellm resolves BOTH halves of the call from the AMBIENT
+PROCESS ENVIRONMENT, and both chains end at the vendor (read in litellm 1.98.0, main.py:2744
+and :2748):
+
+    api_key  = api_key  or litellm.anthropic_key or litellm.api_key
+                        or os.environ.get("ANTHROPIC_API_KEY")
+    api_base = api_base or litellm.api_base or get_secret("ANTHROPIC_API_BASE")
+                        or get_secret("ANTHROPIC_BASE_URL")
+                        or "https://api.anthropic.com/v1/messages"
+
+So before this change ``reason()`` reached the vendor using whatever key its HOST happened to
+hold, while never naming that key anywhere in this tree. That is the whole hazard of a library:
+a service that deletes its own ANTHROPIC_API_KEY and then imports this one has not closed its
+door, it has moved the door one import deeper — into a dependency whose diff it does not read
+and whose environment it does not think of as its own. A transitive dependency is a door. The
+estate-wide scan for ANTHROPIC_API_KEY scored this repo 0, and 0 was the most misleading number
+in that table: it measured whether the credential was NAMED here, when what mattered was
+whether it was USED here.
+
+WHO ACTUALLY REACHES THIS. Established by reading the consumers rather than assuming: the four
+call sites are ``agents/apollo/wordsmith.py``, ``agents/apollo/curator.py``,
+``agents/athena/oracle.py`` and ``agents/croesus/advisor.py``. Live callers are novahound
+(imports ``novahos.agents.apollo`` and ``novahos.llm`` directly in ``compose.py``) and lucid
+(``novahos.agents.resolve("croesus", "assess")`` in ``app/experts/steward.py``). echo, icp,
+novaherald, novahub, odyssey, novahawk and wolfos pin this library but import only
+``warden_runtime`` / ``agent`` / ``mcp`` / ``sources`` / ``audit_trail``, so this path is dead
+code in those processes today. It is one import away from not being, in any of them, which is
+the reason to close it here rather than in each host.
+
+WHERE THE CONFIG IS READ, AND WHY IT IS NOT IN config.py
+────────────────────────────────────────────────────────
+The gateway URL and token are read from ``os.environ`` AT CALL TIME, through the stdlib-only
+:mod:`novahos.gateway_url` resolver — deliberately NOT through :class:`CoreSettings`. Three
+reasons, all of which are specifically about being a library rather than a service:
+
+1. ``settings = CoreSettings()`` runs at IMPORT of ``novahos.config``, snapshotting the
+   environment at whatever instant the host first touched the kernel. Hosts touch it at wildly
+   different instants — novahound imports ``novahos.llm`` inside a request handler, lucid
+   imports ``novahos.agents`` lazily inside ``_resolve_croesus()`` — and a host that loads its
+   secrets after that first import would snapshot an empty gateway URL. Reading at call time
+   deletes the ordering question rather than documenting it.
+2. ``CoreSettings`` is configured with ``env_file=".env"``, so it also reads a dotenv file out
+   of the host's working directory. That is a config source the HOST did not choose. Tolerable
+   for a model id; not for the value that decides whether spend is gated.
+3. ``CoreSettings`` needs pydantic-settings, which lives in the ``substrate`` EXTRA. A guard
+   that cannot load in a half-installed environment is a guard that can be missing, and the
+   half-installed environment is exactly where you want it loudest.
+
+Using the same module and the same two variable names as echo and NovahPrime is the point: one
+definition of what this setting means, estate-wide. The model ids stay in ``CoreSettings``,
+because those are routing rather than credentials and a wrong one fails loudly at the gateway.
+
+Hosts that would rather not mutate ``os.environ`` can call :func:`configure_gateway` instead.
+It runs through the identical validation, so it is a convenience, never a bypass.
+
 METERING (audit P0: the kernel used to bill money and record NOTHING). Every paid call
 through this gateway is now accounted for exactly once, by one of two owners:
 
@@ -25,6 +88,33 @@ problems), because a dead meter that logs at debug is how spend goes missing for
 Attribution: call ``set_account(email)`` on the thread that drives the work to tie kernel
 spend to a customer. Unset is recorded as NULL rather than dropped, so the spend is still
 visible even when the caller forgot.
+
+KNOWN CONSEQUENCE OF ROUTING THROUGH THE GATEWAY — READ BEFORE DEPLOY
+────────────────────────────────────────────────────────────────────
+The metering above is deliberately UNCHANGED by this migration, and that leaves a live
+double-count to resolve separately. novahub's gateway hands each call to
+``llm_client.call_claude``, which writes the spend to the ``llm_usage`` meter AND to the
+suite-shared ``ai_usage`` ledger (novahub PR #456). ``_emit_shared()`` below writes to
+``ai_usage`` too. Once the gateway is deployed and a host bumps its novahos pin, one kernel
+call can therefore produce TWO ``ai_usage`` rows: the gateway's and the kernel's.
+
+It is stated here rather than fixed here on purpose. Egress and accounting are two changes,
+and an accounting bug introduced alongside an egress change is invisible until a bill arrives.
+Nothing double-counts yet: ``/llm/v1/messages`` is not deployed (verified — it answers 404
+while ``/healthz`` answers 200), and every consumer that reaches this module is pinned to an
+older SHA. So there is time to do it deliberately, and whoever bumps the first pin owns closing
+it. The same question applies to the host-owned capture path, since novahound's ``compose.py``
+writes its collected rows to ``ai_usage`` as well.
+
+One consumer is NOT pinned by SHA: ``wolfos/lucid/requirements.txt`` tracks
+``novahos.git@main``, so it picks this change up on its next build with no pin bump. That is
+safe only because wolfos imports ``novahos.sources``, ``novahos.warden`` and
+``novahos.sources.discovery`` and never reaches this module — checked, not assumed. It is
+listed here because "pinned by SHA, so nothing moves until someone bumps it" is the assumption
+this change rests on, and it is not true of every consumer.
+
+Do not "fix" it by making the kernel stop writing. A silent meter is the defect the METERING
+section above exists to have closed; trading a double-count for darkness is not an improvement.
 """
 import json
 import logging
@@ -33,7 +123,12 @@ import threading
 
 import litellm
 
+from . import gateway_url
 from .config import settings
+
+# Re-exported so callers catch the SAME exception the resolver raises. A second exception type
+# for "we refused to spend" would read to a caller as an unexpected crash.
+from .gateway_url import GatewayMisconfigured, GatewayNotConfigured  # noqa: F401
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +137,135 @@ _account = threading.local()
 
 _engine = None            # lazily-built async engine for the shared ledger
 _engine_unavailable = False   # latches after one failure so we warn once, not per call
+
+# Process-global, unlike the thread-locals above: capture and account bracket a unit of WORK,
+# whereas this is a deployment fact about the process. Empty = read os.environ only.
+_gateway_override: dict[str, str] = {}
+_warned_host_key = False      # latches so the host-key warning is once per process, not per call
+
+
+def configure_gateway(*, url: str | None = None, token: str | None = None) -> None:
+    """Set this process's gateway URL/token in code, instead of via the environment.
+
+    For hosts that configure their dependencies explicitly rather than by mutating
+    ``os.environ``. Values set here take precedence over the environment for THIS library
+    only, and are validated by exactly the same resolver — so this is a convenience, never a
+    bypass: a vendor URL or a vendor-shaped token is refused here just as loudly as it is
+    when it arrives from the environment. Pass ``None`` to leave a field to the environment;
+    pass ``""`` to clear an override back to the environment."""
+    for key, val in ((gateway_url.CANONICAL_URL_ENV, url),
+                     (gateway_url.CANONICAL_TOKEN_ENV, token)):
+        if val is None:
+            continue
+        if val.strip():
+            _gateway_override[key] = val.strip()
+        else:
+            _gateway_override.pop(key, None)
+
+
+def _gateway_env() -> dict:
+    """The environment the resolver reads: ``os.environ``, with any override on top."""
+    if not _gateway_override:
+        return os.environ
+    merged = dict(os.environ)
+    merged.update(_gateway_override)
+    return merged
+
+
+def _warn_if_host_holds_vendor_key() -> None:
+    """Say so, once, if the HOST process still carries a vendor key.
+
+    novahos cannot delete it and must not refuse because of it — every one of the seven hosts
+    legitimately still holds one until its own migration lands and the variable is removed.
+    But while it is present, any code in the process that calls litellm WITHOUT pinning
+    api_base still reaches the vendor with it, and this module's fail-closed behaviour says
+    nothing whatsoever about those paths. Silence there would be its own small lie.
+
+    Presence only. The value is never read into a variable and never logged."""
+    global _warned_host_key
+    if _warned_host_key or not os.environ.get("ANTHROPIC_API_KEY"):
+        return
+    _warned_host_key = True
+    log.warning(
+        "[novahos.llm] ANTHROPIC_API_KEY is set in this process. novahos does not use it — "
+        "every call from here is pinned to the gateway — but any OTHER litellm or SDK call in "
+        "this host that does not pin api_base will reach the vendor directly with it, "
+        "unmetered and unapproved. Delete it once this service's own migration is deployed.")
+
+
+#: Model prefixes litellm routes to infrastructure WE run (OLLAMA_API_BASE, default
+#: http://localhost:11434). These never reach a vendor, so they must NOT be pinned at the
+#: gateway: doing so would push text a host deliberately kept on its own box out to a vendor,
+#: which is the exact inversion of why a host chose a local model. Everything NOT on this list
+#: is treated as cloud and REQUIRES the door — an unknown prefix fails closed rather than
+#: being assumed safe.
+_SELF_HOSTED_PREFIXES = ("ollama/", "ollama_chat/")
+
+
+def is_self_hosted(model: str) -> bool:
+    """True when `model` runs on the host's own infra and needs no gateway."""
+    return (model or "").startswith(_SELF_HOSTED_PREFIXES)
+
+
+def _route(model: str) -> tuple[str, dict]:
+    """The model id to send, plus the kwargs that pin this call at the ONE door.
+
+    Returns ``(model, kwargs)``; splat the kwargs into ``litellm.acompletion``. For a
+    self-hosted model the kwargs are empty and nothing is redirected. For a cloud model they
+    carry ``api_base`` + ``api_key``, and this RAISES :class:`GatewayNotConfigured` when either
+    is missing — so no cloud call is attempted at all.
+
+    PER-CALL, not an env var and not the ``litellm.api_base`` global. All three were read in
+    litellm 1.98.0 to decide this, and the two rejected options fail in opposite directions:
+
+    * the ENV VARS (``ANTHROPIC_API_BASE`` / ``ANTHROPIC_BASE_URL``) are read only as the LAST
+      fallback before a hardcoded vendor URL. ``main.py:2748`` is literally
+      ``api_base or litellm.api_base or get_secret("ANTHROPIC_API_BASE") or
+      get_secret("ANTHROPIC_BASE_URL") or "https://api.anthropic.com/v1/messages"``. A dropped
+      Railway variable, a typo, a container that does not inherit the env — none of those is an
+      error there. Each is a silent direct call to the vendor that SUCCEEDS.
+    * the ``litellm.api_base`` GLOBAL is worse, because it is read BEFORE the per-call value on
+      the ollama path: ``main.py:4225`` is ``litellm.api_base or api_base or
+      get_secret("OLLAMA_API_BASE") or "http://localhost:11434"``. Setting the global would drag
+      a host that deliberately runs a local model through the gateway and out to a vendor — the
+      exact inversion of why that host chose a local model.
+
+    Per-call ``api_base`` is first in the chain on the cloud path and is ignored on the local
+    one. It is the only one of the three that can fail closed, and the only one that cannot
+    reach past this module into a host's other litellm usage.
+
+    The ``anthropic/`` prefix pins provider resolution to the model id we send rather than
+    leaving it to the installed version's bundled model table. On 1.98.0 both configured
+    defaults resolve to the anthropic provider without it, so today it is belt-and-braces — but
+    the floor in pyproject.toml is 1.40, the ids are host-overridable via ``REASONING_MODEL``,
+    and a model id an older table does not know is exactly the case where resolution goes
+    somewhere else. Verified on 1.98.0 that litellm strips the prefix again before the wire
+    (``get_llm_provider("anthropic/claude-opus-4-8") -> ("claude-opus-4-8", "anthropic", …)``),
+    so the gateway still receives the bare id and the approval email still names the real model.
+    """
+    if is_self_hosted(model):
+        return model, {}          # host's own infra — never leaves it, never needs the door
+
+    _warn_if_host_holds_vendor_key()
+    env = _gateway_env()
+    # messages_url() appends /v1/messages explicitly rather than trusting litellm to. 1.98.0
+    # DOES append it when absent (main.py:2759), but the floor here is litellm>=1.40 and
+    # versions below 1.45 append nothing — so the full path is the only value that is correct
+    # across the whole supported range, and an explicit append is greppable where a version
+    # assumption is not. messages_url() also refuses a URL that names a vendor, and token()
+    # refuses a value shaped like a vendor key: both otherwise WORK, silently, past the door.
+    gate = {"api_base": gateway_url.messages_url(env),
+            "api_key": gateway_url.token(env)}
+    # Name the person the spend belongs to, so the gateway's approval email says WHO wanted it
+    # rather than only that something did. Absent, the hub attributes it to the calling service.
+    # The hub reads this off the request (novahub app.py llm_gateway_messages), alongside the
+    # x-api-key litellm sends the token as by default (verified: anthropic/common_utils.py
+    # _make_api_key_auth_header defaults to x-api-key). Never put x-api-key or authorization in
+    # here — caller headers win the merge, which would override the gateway token itself.
+    acting = _account_email()
+    if acting:
+        gate["extra_headers"] = {"X-Acting-Email": acting}
+    return (model if "/" in model else f"anthropic/{model}"), gate
 
 
 def set_account(email: str | None) -> None:
@@ -214,14 +438,20 @@ def _record(resp, model: str) -> None:
 async def reason(system: str, user: str, max_tokens: int = 2000, *,
                  task: str = "kernel.reason") -> str:
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    resp = await litellm.acompletion(model=settings.reasoning_model, messages=messages, max_tokens=max_tokens)
+    # _route() first, and OUTSIDE the call: an unconfigured gateway raises here, before a
+    # socket is opened. Metering still records settings.reasoning_model, not the routed id, so
+    # ledger rows keep the shape every existing report and reconciliation already reads.
+    model, gate = _route(settings.reasoning_model)
+    resp = await litellm.acompletion(model=model, messages=messages, max_tokens=max_tokens, **gate)
     await _meter(resp, settings.reasoning_model, task)
     return resp.choices[0].message.content or ""
 
 
 async def classify(prompt: str, *, task: str = "kernel.classify") -> str:
-    resp = await litellm.acompletion(model=settings.cheap_model,
-                                     messages=[{"role": "user", "content": prompt}], max_tokens=400)
+    model, gate = _route(settings.cheap_model)
+    resp = await litellm.acompletion(model=model,
+                                     messages=[{"role": "user", "content": prompt}],
+                                     max_tokens=400, **gate)
     await _meter(resp, settings.cheap_model, task)
     return resp.choices[0].message.content or ""
 

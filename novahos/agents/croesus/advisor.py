@@ -34,5 +34,11 @@ async def assess(snapshot: dict) -> dict:
     )
     try:
         return llm.parse_json(await llm.reason(_SYSTEM, prompt))
+    except (llm.GatewayNotConfigured, llm.GatewayMisconfigured):
+        # Fail-quiet is right for a model that stumbled and wrong for a door that is shut. `{}`
+        # is already this function's "no real signal" answer for an empty snapshot, and lucid's
+        # Steward renders a generic-but-real reading from it — so swallowing here would show a
+        # person a financial opinion with nothing behind it. Refuse out loud instead.
+        raise
     except Exception:
         return {}
