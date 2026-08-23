@@ -95,17 +95,34 @@ MESSAGES_PATH = "/v1/messages"
 # Trimmed to reach origin+mount. Longest first, so /v1/messages wins over /v1.
 _TRIM = (MESSAGES_PATH, "/v1")
 
-# Hosts that must never appear in a GATEWAY url: reaching one means the gateway was bypassed
-# while looking configured. Deliberately short. This is a "did you point it at the vendor"
-# check, not a general egress denylist — that job belongs to the shared
-# .github/actions/vendor-egress-gate, which novahos does not yet run (see docs/LLM_GATEWAY.md).
-_VENDOR_HOSTS = frozenset({
-    "api.anthropic.com", "api.openai.com", "api.voyageai.com", "api.cohere.ai",
-    "api.groq.com", "api.together.xyz", "api.mistral.ai", "api.replicate.com",
-    "api.deepgram.com", "api.assemblyai.com", "api.elevenlabs.io",
-    "api-inference.huggingface.co", "generativelanguage.googleapis.com",
-    "api.perplexity.ai", "api.x.ai",
+# Vendor REGISTRABLE DOMAINS — deliberately not API hostnames. This list was
+# "api.anthropic.com, api.openai.com, …" and the check was ``host in _VENDOR_HOSTS``, which is
+# exact set membership. That accepted every one of these as a gateway:
+#
+#     https://anthropic.com/llm             the bare domain was never in the set
+#     https://foo.api.anthropic.com/llm     a subdomain was never in the set
+#     https://api.anthropic.com./llm        the trailing dot is the DNS root, and resolves to
+#                                           the identical addresses
+#
+# Naming the registrable domain and matching on DNS LABEL BOUNDARIES covers all three at once,
+# and needs no public-suffix list: a PSL is required to compute an UNKNOWN host's registrable
+# domain, not to ask whether a host sits under one of a handful of KNOWN ones.
+#
+# Still deliberately short. This is a "did you point it at the vendor" check, not a general
+# egress denylist — that job belongs to .github/actions/vendor-egress-gate/check.py, which is
+# also why this file sits on that checker's allow list. A checker and a guard both have to name
+# the hosts they guard against.
+_VENDOR_DOMAINS = frozenset({
+    "anthropic.com", "openai.com", "voyageai.com", "cohere.ai", "cohere.com",
+    "groq.com", "together.xyz", "together.ai", "mistral.ai", "replicate.com",
+    "deepgram.com", "assemblyai.com", "elevenlabs.io", "huggingface.co",
+    "googleapis.com", "perplexity.ai", "x.ai",
 })
+
+#: Back-compat alias for the pre-2026-08-22 name. It was a set of API hostnames; it is now a
+#: set of registrable domains, so a membership test against it is strictly broader than before.
+#: odyssey's test_llm_one_door.py reads it by this name.
+_VENDOR_HOSTS = _VENDOR_DOMAINS
 
 # Plain http is tolerated only here: a local gateway during development. Everywhere else the
 # token and the prompt both cross that hop in clear text.
@@ -115,6 +132,49 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 # credential the gateway exists to hold. Pasted into LLM_GATEWAY_TOKEN it does not fail: the
 # vendor accepts it and the call succeeds, having gone nowhere near the door.
 _VENDOR_KEY_PREFIXES = ("sk-ant-", "sk-proj-", "sk-or-", "gsk_", "pa-")
+
+
+def _labels(host: str) -> tuple:
+    """A hostname as its DNS labels: lowercased, root dot dropped, empties removed.
+
+    ``api.anthropic.com.`` and ``api.anthropic.com`` are the same name. The trailing dot is the
+    DNS root, every resolver returns the identical addresses for both, and before this function
+    existed the dotted form was accepted as a gateway by every implementation in the estate —
+    including the two that already matched subdomains correctly.
+    """
+    return tuple(part for part in host.strip().lower().rstrip(".").split(".") if part)
+
+
+def _vendor_domain_of(host: str):
+    """``(vendor_domain, "under" | "embedded")`` if this host is a vendor's, else ``None``.
+
+    ``under``    the host IS a vendor domain, or sits beneath one. ``anthropic.com``,
+                 ``api.anthropic.com`` and ``foo.api.anthropic.com`` all reach Anthropic.
+
+    ``embedded`` the vendor's labels appear in the host but NOT at the end, so the name is
+                 somebody else's: ``api.anthropic.com.evil.tld`` sits under ``evil.tld``. It
+                 does not reach the vendor — it reaches whoever owns ``evil.tld``, carrying the
+                 prompt and this service's gateway token, while reading to a human scanning a
+                 variable list as though it were the vendor.
+
+    Matching is on whole labels, which is the entire point. ``host.endswith("anthropic.com")``
+    would refuse ``notanthropic.com``, a name with no relationship to the vendor at all, and a
+    guard that refuses correct configurations is a guard people learn to route around.
+    """
+    labels = _labels(host)
+    if not labels:
+        return None
+    ordered = sorted(_VENDOR_DOMAINS)  # sorted so the refusal message is deterministic
+    for domain in ordered:
+        want = tuple(domain.split("."))
+        if len(labels) >= len(want) and labels[-len(want):] == want:
+            return domain, "under"
+    for domain in ordered:
+        want = tuple(domain.split("."))
+        for i in range(len(labels) - len(want)):  # stops before the tail, checked above
+            if labels[i:i + len(want)] == want:
+                return domain, "embedded"
+    return None
 
 
 class GatewayNotConfigured(RuntimeError):
@@ -157,11 +217,30 @@ def base_url(env: dict | None = None) -> str:
         raise GatewayMisconfigured(f"{CANONICAL_URL_ENV}={raw!r} has no host.")
 
     host = (parts.hostname or "").lower()
-    if host in _VENDOR_HOSTS:
+    if not host.isascii():
         raise GatewayMisconfigured(
-            f"{CANONICAL_URL_ENV} points at {host}, which is a model vendor, not the gateway. "
-            f"Every call would be a direct vendor call that looks configured: unmetered, "
-            f"unapproved, and invisible to the spend ledger. Point it at the gateway.")
+            f"{CANONICAL_URL_ENV}={raw!r} has a non-ASCII hostname. Comparing a Unicode name "
+            f"against the vendor list would need a homograph table, so it is refused "
+            f"rather than guessed at. If the host really is an internationalised name, "
+            f"set its punycode (xn--…) form, which this check reads.")
+
+    match = _vendor_domain_of(host)
+    if match:
+        domain, how = match
+        if how == "under":
+            raise GatewayMisconfigured(
+                f"{CANONICAL_URL_ENV} points at {host}, which is {domain} — a model vendor, not the "
+                f"gateway. Every call would be a direct vendor call that looks "
+                f"configured: unmetered, unapproved, and invisible to the spend "
+                f"ledger. Point it at the gateway.")
+        owner = ".".join(_labels(host)[-2:])
+        raise GatewayMisconfigured(
+            f"{CANONICAL_URL_ENV} points at {host}, which contains the vendor domain {domain} but is "
+            f"not under it — this name belongs to whoever owns {owner}. It does not "
+            f"reach {domain}; it reaches them, carrying the prompt and this service's "
+            f"gateway token, while reading like the vendor to anyone scanning a "
+            f"variable list. If it really is your own host, give it a name that does "
+            f"not impersonate a vendor.")
     if parts.scheme == "http" and host not in _LOOPBACK_HOSTS:
         raise GatewayMisconfigured(
             f"{CANONICAL_URL_ENV}={raw!r} is plain http to a remote host. The gateway token and "
