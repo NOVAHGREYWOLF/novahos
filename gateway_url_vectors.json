@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "doc": "The gateway-URL contract, as data. Vendored byte-identical into every repo that carries a copy of the normaliser; each repo's tests/test_gateway_url_conformance.py binds its OWN entry point to this table and pins this file's sha256. The normaliser itself cannot be shared - 14 repos, 14 module paths, different env-var tuples, different exception hierarchies, different public APIs - so the BEHAVIOUR is the shared artefact, not the bytes of the code. See docs/LLM_GATEWAY.md, 'Fourteen copies, one contract'.",
+  "vectors": [
+    {
+      "url": "https://api.anthropic.com/v1/messages",
+      "verdict": "refuse",
+      "why": "the exact vendor API host. The only shape the original set-membership check caught."
+    },
+    {
+      "url": "https://api.anthropic.com/llm",
+      "verdict": "refuse",
+      "why": "same host, gateway-shaped path. Path is irrelevant; the host is the bill."
+    },
+    {
+      "url": "https://anthropic.com/llm",
+      "verdict": "refuse",
+      "why": "the bare registrable domain. Accepted by 12 of 14 implementations before this table."
+    },
+    {
+      "url": "https://foo.api.anthropic.com/llm",
+      "verdict": "refuse",
+      "why": "a subdomain of a vendor host. Accepted by 12 of 14 implementations before this table."
+    },
+    {
+      "url": "https://api.anthropic.com./llm",
+      "verdict": "refuse",
+      "why": "trailing dot is the DNS root: resolves to the identical addresses. Accepted by ALL 14 implementations before this table, including the two that already matched subdomains."
+    },
+    {
+      "url": "https://API.ANTHROPIC.COM/llm",
+      "verdict": "refuse",
+      "why": "case is not a bypass."
+    },
+    {
+      "url": "https://ANTHROPIC.COM./llm",
+      "verdict": "refuse",
+      "why": "case and root dot together are not a bypass."
+    },
+    {
+      "url": "https://api.anthropic.com:443/llm",
+      "verdict": "refuse",
+      "why": "a port is not a bypass."
+    },
+    {
+      "url": "https://gw.leadfuel.cloud@api.anthropic.com/llm",
+      "verdict": "refuse",
+      "why": "userinfo decoy: the host is everything after '@'. Reads like the gateway, is not."
+    },
+    {
+      "url": "https://api.openai.com/v1",
+      "verdict": "refuse",
+      "why": "a second vendor, to prove the list is not Anthropic-only."
+    },
+    {
+      "url": "https://generativelanguage.googleapis.com/llm",
+      "verdict": "refuse",
+      "why": "Google's model endpoint."
+    },
+    {
+      "url": "https://storage.googleapis.com/llm",
+      "verdict": "refuse",
+      "why": "under googleapis.com. Not a model endpoint, but nobody's gateway lives there either, and a denylist that has to be right about which subdomain bills you is a denylist that will one day be wrong."
+    },
+    {
+      "url": "https://api-inference.huggingface.co/llm",
+      "verdict": "refuse",
+      "why": "under huggingface.co."
+    },
+    {
+      "url": "https://x.ai/llm",
+      "verdict": "refuse",
+      "why": "a two-label vendor domain is still a vendor domain."
+    },
+    {
+      "url": "https://api.x.ai/llm",
+      "verdict": "refuse",
+      "why": "and its API subdomain."
+    },
+    {
+      "url": "https://api.anthropic.com.evil.tld/llm",
+      "verdict": "refuse",
+      "why": "embeds a vendor domain without sitting under it. Reaches evil.tld - carrying the prompt and this service's gateway token - while reading like the vendor to a human scanning a variable list. REVERSES an earlier deliberate decision to accept this."
+    },
+    {
+      "url": "https://openai.com.leadfuel.cloud/llm",
+      "verdict": "refuse",
+      "why": "the same shape on a host we own. Still refused: the check cannot tell the two apart, and the fix is one rename."
+    },
+    {
+      "url": "https://аnthropic.com/llm",
+      "verdict": "refuse",
+      "why": "Cyrillic small a. Non-ASCII hostnames are refused outright rather than compared against a homograph table we would have to maintain."
+    },
+    {
+      "url": "https://notanthropic.com/llm",
+      "verdict": "accept",
+      "base_url": "https://notanthropic.com/llm",
+      "why": "a different registrable domain that merely ends in the vendor's string. The naive host.endswith('anthropic.com') fix refuses this, and a guard that refuses correct configurations is one people learn to route around."
+    },
+    {
+      "url": "https://myhuggingface.co/llm",
+      "verdict": "accept",
+      "base_url": "https://myhuggingface.co/llm",
+      "why": "same trap, one label long."
+    },
+    {
+      "url": "https://xx.ai/llm",
+      "verdict": "accept",
+      "base_url": "https://xx.ai/llm",
+      "why": "same trap against a two-label vendor domain."
+    },
+    {
+      "url": "https://xn--nthropic-b0j.com/llm",
+      "verdict": "accept",
+      "base_url": "https://xn--nthropic-b0j.com/llm",
+      "why": "punycode is ASCII and is read normally. The non-ASCII refusal is not a ban on IDN."
+    },
+    {
+      "url": "https://leadfuel.cloud/llm",
+      "verdict": "accept",
+      "base_url": "https://leadfuel.cloud/llm",
+      "why": "the canonical form: origin + mount, no /v1, no /v1/messages."
+    },
+    {
+      "url": "https://leadfuel.cloud/llm/",
+      "verdict": "accept",
+      "base_url": "https://leadfuel.cloud/llm",
+      "why": "a trailing slash is not a second convention."
+    },
+    {
+      "url": "https://leadfuel.cloud/llm/v1",
+      "verdict": "accept",
+      "base_url": "https://leadfuel.cloud/llm",
+      "why": "trimmed."
+    },
+    {
+      "url": "https://leadfuel.cloud/llm/v1/messages",
+      "verdict": "accept",
+      "base_url": "https://leadfuel.cloud/llm",
+      "why": "echo's shipped value. Trimmed to the same string NovahPrime shipped."
+    },
+    {
+      "url": "  https://leadfuel.cloud/llm/v1/messages  ",
+      "verdict": "accept",
+      "base_url": "https://leadfuel.cloud/llm",
+      "why": "whitespace from a copy-paste into a Railway variable."
+    },
+    {
+      "url": "https://sub.leadfuel.cloud/llm",
+      "verdict": "accept",
+      "base_url": "https://sub.leadfuel.cloud/llm",
+      "why": "a subdomain of a host we own is not a vendor."
+    },
+    {
+      "url": "http://leadfuel.cloud/llm",
+      "verdict": "refuse",
+      "why": "plain http to a remote host: the gateway token and the prompt both cross that hop."
+    },
+    {
+      "url": "http://api.anthropic.com/llm",
+      "verdict": "refuse",
+      "why": "both wrong at once; either alone is enough."
+    },
+    {
+      "url": "http://localhost:5000/llm",
+      "verdict": "accept",
+      "base_url": "http://localhost:5000/llm",
+      "why": "a local gateway in dev."
+    },
+    {
+      "url": "http://127.0.0.1:5000/llm",
+      "verdict": "accept",
+      "base_url": "http://127.0.0.1:5000/llm",
+      "why": "same, by address."
+    },
+    {
+      "url": "ftp://leadfuel.cloud/llm",
+      "verdict": "refuse",
+      "why": "not an http(s) URL."
+    },
+    {
+      "url": "api.anthropic.com/llm",
+      "verdict": "refuse",
+      "why": "no scheme, so no host: urlsplit reads it as a path."
+    },
+    {
+      "url": "/llm/v1/messages",
+      "verdict": "refuse",
+      "why": "a path with no origin."
+    },
+    {
+      "url": "not a url",
+      "verdict": "refuse",
+      "why": "not a URL at all."
+    },
+    {
+      "url": "",
+      "verdict": "refuse",
+      "why": "unset. Absence of a decision is never permission."
+    }
+  ]
+}
