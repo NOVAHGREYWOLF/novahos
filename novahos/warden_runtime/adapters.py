@@ -21,8 +21,13 @@ from .types import ActionRequest, AuthTier, ConsentTier, PrivacyTier
 
 _TIER_ENUM = {_consent.GREEN: ConsentTier.GREEN, _consent.YELLOW: ConsentTier.YELLOW,
               _consent.RED: ConsentTier.RED}
-_PRIVACY_ENUM = {_privacy.PRIVATE: PrivacyTier.TIER_1, _privacy.SEMI: PrivacyTier.TIER_2,
-                 _privacy.PUBLIC: PrivacyTier.TIER_3}
+# LOCAL_ONLY is stricter than the runtime's 3-tier enum can express, so it maps to TIER_1 (the
+# strictest the runtime knows). Listed EXPLICITLY rather than left to the `.get` default: the
+# default already fails safe, but an unlisted tier failing safe by accident is not the same as a
+# tier that is documented to map here. The extra restriction LOCAL_ONLY carries over PRIVATE
+# (never replicate to another node) is enforced by privacy.may_replicate_to_node, not here.
+_PRIVACY_ENUM = {_privacy.LOCAL_ONLY: PrivacyTier.TIER_1, _privacy.PRIVATE: PrivacyTier.TIER_1,
+                 _privacy.SEMI: PrivacyTier.TIER_2, _privacy.PUBLIC: PrivacyTier.TIER_3}
 
 
 class NovahosConsentResolver:
