@@ -86,7 +86,22 @@ class AgentManifest:
 
     @classmethod
     def from_file(cls, path: str | Path) -> AgentManifest:
-        import yaml  # lazy: only manifests loaded from disk need PyYAML; from_dict stays stdlib
+        # Lazy: only manifests loaded from disk need PyYAML, so from_dict stays stdlib and the
+        # rails keep their zero-dependency promise. But `novahos` declares NO core dependencies,
+        # so a consumer installing plain `novahos` can import this class and call this method
+        # and get `ModuleNotFoundError: No module named 'yaml'` — an error that names a package
+        # they never asked for and does not say what to install. reach hit exactly that: six red
+        # tests on main, diagnosed twice at the wrong layer before anyone read the traceback far
+        # enough to see it was pointing into site-packages/novahos, not into reach.
+        try:
+            import yaml
+        except ModuleNotFoundError as exc:  # pragma: no cover - exercised via the test below
+            raise ManifestError(
+                "Reading a manifest from disk needs PyYAML, which plain `novahos` does not "
+                "install (the kernel declares no core dependencies on purpose). Install "
+                "`novahos[manifests]` for just the YAML reader, or `novahos[agents]` if you "
+                "also want the agent runtime. `AgentManifest.from_dict` needs neither."
+            ) from exc
 
         p = Path(path)
         if not p.is_file():
