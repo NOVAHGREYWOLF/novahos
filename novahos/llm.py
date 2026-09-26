@@ -134,6 +134,7 @@ log = logging.getLogger(__name__)
 
 _capture = threading.local()
 _account = threading.local()
+_trigger_tl = threading.local()
 
 _engine = None            # lazily-built async engine for the shared ledger
 _engine_unavailable = False   # latches after one failure so we warn once, not per call
@@ -262,9 +263,20 @@ def _route(model: str) -> tuple[str, dict]:
     # x-api-key litellm sends the token as by default (verified: anthropic/common_utils.py
     # _make_api_key_auth_header defaults to x-api-key). Never put x-api-key or authorization in
     # here — caller headers win the merge, which would override the gateway token itself.
+    # X-Trigger names WHAT set the call off, so the gateway's daily ceiling can refuse a
+    # cron sweep without ever refusing someone sitting at a keyboard. Without it every
+    # kernel call is indistinguishable from a person, and the ceiling's only options are
+    # to refuse both or neither. instagram-outreach has sent it since the door opened;
+    # the kernel did not, so kernel-originated spend was unattributable by cause.
+    headers = {}
     acting = _account_email()
     if acting:
-        gate["extra_headers"] = {"X-Acting-Email": acting}
+        headers["X-Acting-Email"] = acting
+    trigger = _trigger()
+    if trigger:
+        headers["X-Trigger"] = trigger
+    if headers:
+        gate["extra_headers"] = headers
     return (model if "/" in model else f"anthropic/{model}"), gate
 
 
@@ -277,6 +289,20 @@ def set_account(email: str | None) -> None:
 
 def _account_email() -> str | None:
     return getattr(_account, "email", None)
+
+
+def set_trigger(trigger: str | None) -> None:
+    """Attribute subsequent kernel LLM calls on THIS thread to a cause ("cron", "user", ...).
+
+    Thread-local, same as :func:`set_account`. Left unset the gateway sees no X-Trigger and
+    falls back to its own default, which is the pre-existing behaviour — so this is additive,
+    never a new refusal. Set it at the entry point that KNOWS the cause (a scheduler sets
+    "cron", a request handler sets "user"); a module deep in a call stack does not know."""
+    _trigger_tl.value = ((trigger or "").strip() or None)
+
+
+def _trigger() -> str | None:
+    return getattr(_trigger_tl, "value", None)
 
 
 def _shared_engine():
