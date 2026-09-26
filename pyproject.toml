@@ -18,6 +18,10 @@ dependencies = []  # the rails + foundation are stdlib-only; heavy layers are ex
 # rebuild resolve to whatever PyPI has that day. Bump deliberately, and re-run
 # tests/test_llm_one_door.py against the new version when you do.
 [project.optional-dependencies]
+# Manifests: AgentManifest.from_file() parses YAML off disk. Deliberately its own extra —
+# a service that only READS manifests (reach does) should not have to install litellm, river
+# and sqlalchemy to do it, which is what `agents` would cost it.
+manifests = ["pyyaml>=6.0"]
 # Substrate: DB + LLM gateway + learning + the WolfOS bridge.
 substrate = [
     "sqlalchemy[asyncio]>=2.0",
