@@ -79,10 +79,12 @@ def fake(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     llm._gateway_override.clear()
     llm.set_account(None)
+    llm.set_trigger(None)
     monkeypatch.setattr(llm, "_warned_host_key", False)
     yield f
     llm._gateway_override.clear()
     llm.set_account(None)
+    llm.set_trigger(None)
 
 
 def configured(monkeypatch):
@@ -234,6 +236,52 @@ async def test_no_acting_header_when_no_account_is_set(fake, monkeypatch):
     configured(monkeypatch)
     await llm.reason("sys", "user")
     assert "extra_headers" not in fake.calls[0]
+
+
+async def test_the_trigger_is_named_to_the_gateway_when_one_is_set(fake, monkeypatch):
+    """So the daily ceiling can refuse a cron sweep without ever refusing a person.
+
+    Without X-Trigger every kernel call looks the same to the ceiling, and its only choices
+    are to refuse both or neither. instagram-outreach has sent this since the door opened."""
+    configured(monkeypatch)
+    llm.set_trigger("cron")
+    await llm.reason("sys", "user")
+    assert fake.calls[0]["extra_headers"] == {"X-Trigger": "cron"}
+
+
+async def test_the_account_and_the_trigger_are_sent_together(fake, monkeypatch):
+    """WHO and WHAT-set-it-off are independent: neither may displace the other."""
+    configured(monkeypatch)
+    llm.set_account("Someone@Example.com")
+    llm.set_trigger("cron")
+    await llm.reason("sys", "user")
+    assert fake.calls[0]["extra_headers"] == {"X-Acting-Email": "someone@example.com",
+                                              "X-Trigger": "cron"}
+
+
+async def test_no_trigger_header_when_none_is_set(fake, monkeypatch):
+    """Unset stays unset: the gateway keeps its own default, so this is additive and can
+    never turn into a new refusal for a caller that never set a trigger."""
+    configured(monkeypatch)
+    llm.set_account("someone@example.com")
+    await llm.reason("sys", "user")
+    assert "X-Trigger" not in fake.calls[0]["extra_headers"]
+
+
+async def test_whitespace_is_not_a_trigger(fake, monkeypatch):
+    """Mirrors the gateway config rule: a blank value is absence, not a value."""
+    configured(monkeypatch)
+    llm.set_trigger("   ")
+    await llm.reason("sys", "user")
+    assert "extra_headers" not in fake.calls[0]
+
+
+async def test_the_trigger_does_not_unlock_an_unconfigured_gateway(fake):
+    """Attribution is not authorisation — naming a cause must not open the door."""
+    llm.set_trigger("cron")
+    with pytest.raises(llm.GatewayNotConfigured):
+        await llm.reason("sys", "user")
+    assert fake.calls == []
 
 
 async def test_the_gateway_token_is_never_smuggled_in_as_a_caller_header(fake, monkeypatch):
