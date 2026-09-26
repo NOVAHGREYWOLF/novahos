@@ -1,0 +1,85 @@
+# The kernel's first gate. Eleven services install this library; until now the only thing
+# that had ever run its tests was a desk typing `pytest` on one machine, against one Python,
+# with that machine's system site-packages satisfying every import. There were no workflows
+# in this repo at all — and an empty check set read as "green" is an absence, not a pass.
+#
+# TWO JOBS, AND THE FIRST IS THE ONE THAT EARNS ITS KEEP. `suite` runs under [dev], which
+# declares pyyaml, sqlalchemy and the rest, so every lazy import it touches is satisfied and
+# it can say nothing about a plain `novahos` install. `bare-import` installs NO extras, which
+# is the actual promise this package makes: zero core dependencies, stdlib rails.
+#
+# That is not a hypothetical distinction. On 2026-09-26 reach sat red for a day and scope
+# silently reported an EMPTY agent fleet to the hub registry, both because
+# AgentManifest.from_file lazy-imports PyYAML and plain `novahos` never installs it. The defect
+# was diagnosed twice at the wrong layer. `bare-import` would have caught it here, once,
+# instead of at each consumer as somebody happened to look. A `[dev]`-only gate would NOT
+# have: [dev] already declares pyyaml.
+#
+# PYTHON MATRIX, and it is not decoration. requires-python is >=3.11, and reach, signal and
+# echo all run 3.11 in their own CI while this kernel had only ever been measured on 3.12.
+# Testing the floor is testing what most consumers actually execute.
+#
+# RUNNER: needs a twelfth self-hosted container (`novahos`); eleven exist, one per repo. Until
+# NODE provisions it every job here queues forever, and a perpetually-pending check is worse
+# than no check because it reads as "still running" rather than "never ran". Merge this AFTER
+# the runner exists, not before.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+# One run per ref. The box is sixteen cores shared with eleven runners and a ~5 Mbps link;
+# superseded runs should die rather than queue behind themselves.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bare-import:
+    name: bare import (no extras, py${{ matrix.python }})
+    runs-on: [self-hosted, novah]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # `pip install .` with NO extras and NO -e, deliberately: this must exercise the
+      # INSTALLED distribution's metadata, not the source tree on sys.path. A source-tree
+      # run would pass while the built package was still missing a dependency.
+      - name: install the kernel with no extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      # The script refuses (exit 2) rather than guessing if its own precondition is broken —
+      # if PyYAML turns out to be importable here, this job cannot test the promise and says
+      # so instead of reporting a pass. Non-zero fails the job either way, which is correct:
+      # "could not establish" must not be green.
+      - name: the zero-dependency promise
+        run: python scripts/check_no_extras.py
+
+  suite:
+    name: pytest (py${{ matrix.python }})
+    runs-on: [self-hosted, novah]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+      # BARE pytest. Not `pytest tests/`, not a -k sweep: a targeted sweep in this estate once
+      # silently deselected 5,239 tests and nearly reported a clean wall while four unrelated
+      # failures sat unexamined.
+      - name: pytest
+        run: python -m pytest -q
