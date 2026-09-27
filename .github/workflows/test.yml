@@ -1,0 +1,86 @@
+name: tests
+
+# The kernel eleven services install had no CI at all until 2026-09-27: the only gate was a desk
+# running pytest on a box with system site-packages, so nothing ever imported it in a clean
+# environment. That is how `AgentManifest.from_file` came to lazy-import yaml while the core
+# declares zero dependencies, and a consumer (reach) found out seven weeks later.
+#
+# Two jobs, on purpose. The first installs the kernel with NO extras and imports every module:
+# it fails the moment core code reaches for a package only an extra declares. The second runs
+# the suite with the dev extra, which is the ordinary gate. Installing [dev] in the first job
+# would hide the layering defect, because dev already declares pyyaml and httpx.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  kernel-imports:
+    name: kernel imports with no extras
+    runs-on: [self-hosted, novah]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # requires-python >=3.11; the floor is what consumers pin against
+          # No `cache: pip`: on a self-hosted runner it pulls the Actions cache over the same
+          # ~5 Mbps link the local novah-pip-cache volume exists to spare. F:/novah/ci/NOTES.md.
+
+      - name: Install the kernel, no extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+
+      # Import every module under both packages from a directory that is NOT the checkout, so
+      # the installed distribution is what gets imported, not the working tree. A module that
+      # imports an extra at module level fails here; a lazy import inside a function does not,
+      # and that is the layering question this job cannot answer on its own.
+      - name: Import every kernel module
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'PY'
+          import importlib, pkgutil, sys
+          failed = []
+          for root in ("novahos", "leadfuel_core"):
+              pkg = importlib.import_module(root)
+              for m in pkgutil.walk_packages(pkg.__path__, root + "."):
+                  try:
+                      importlib.import_module(m.name)
+                  except Exception as e:  # noqa: BLE001
+                      failed.append(f"{m.name}: {type(e).__name__}: {e}")
+          print(f"imported ok; failures: {len(failed)}")
+          for f in failed:
+              print("  " + f)
+          sys.exit(1 if failed else 0)
+          PY
+
+  pytest:
+    name: pytest (dev extra)
+    runs-on: [self-hosted, novah]
+    # 30, not 10: a cold install over a ~5 Mbps link is what a 10-minute budget dies on
+    # (novahub #567, echo #49). The suite itself is ~36 s serial.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install with the dev extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      # Bare pytest: pyproject's testpaths says tests/, and a path argument here would override
+      # it and go silently vacuous the day a test lands elsewhere.
+      - name: Run the suite
+        run: pytest -q --durations=15
