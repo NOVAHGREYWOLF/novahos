@@ -25,8 +25,15 @@
 # the runner exists, not before.
 name: tests
 
+# `push` is scoped to main on purpose. Unscoped, a branch with an open PR fires BOTH triggers
+# and every run is done twice — 2x the work forever on a box whose documented failure mode is
+# contention (a runner once lost its heartbeat mid-suite while starved). With this split a PR
+# branch gets one run from `pull_request` and main gets one from `push`. The cost is that a
+# branch with no PR is ungated, which is the right trade: it is not going anywhere yet. Matches
+# what novahub's workflows already do.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # One run per ref. The box is sixteen cores shared with eleven runners and a ~5 Mbps link;
