@@ -39,6 +39,11 @@ jobs:
   bare-import:
     name: bare import (no extras, py${{ matrix.python }})
     runs-on: [self-hosted, novah]
+    # 30, not 10 and not the 360-minute default. A cold pip install crosses the same ~5 Mbps link
+    # the local pip volume exists to spare, so a 10-minute budget dies on a cache miss rather than
+    # on a real failure; leaving it unset lets a hung job sit for six hours looking busy. NODE
+    # measured both ends of that — see F:/novah/ci/NOTES.md.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +53,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+          # NO `cache: pip` here, deliberately. On a self-hosted runner it fetches the Actions
+          # cache across the very link the mounted pip volume exists to avoid, and its post-job
+          # save has hung until the timeout killed an otherwise-green job. The runners already
+          # mount novah-pip-cache.
       # `pip install .` with NO extras and NO -e, deliberately: this must exercise the
       # INSTALLED distribution's metadata, not the source tree on sys.path. A source-tree
       # run would pass while the built package was still missing a dependency.
@@ -65,6 +74,7 @@ jobs:
   suite:
     name: pytest (py${{ matrix.python }})
     runs-on: [self-hosted, novah]
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
