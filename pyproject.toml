@@ -18,42 +18,72 @@ dependencies = []  # the rails + foundation are stdlib-only; heavy layers are ex
 # rebuild resolve to whatever PyPI has that day. Bump deliberately, and re-run
 # tests/test_llm_one_door.py against the new version when you do.
 [project.optional-dependencies]
+# UPPER BOUNDS ARE LOAD-BEARING HERE, and unlike novahub's constraints.txt they reach
+# production. novahub pins in constraints.txt, which only CI reads
+# (`pip install -r requirements.txt -c constraints.txt`) while Railway's nixpacks build runs
+# `pip install -r requirements.txt` with no `-c`. This file has no such split: a consumer
+# installing `novahos[substrate]` resolves THESE ranges on both paths, so a bound written here
+# is one of the few that actually governs a deploy.
+#
+# Why they went on: on 2026-09-24 SQLAlchemy 2.1.0 was published and changed the default
+# dialect for a bare `postgresql://` URL from psycopg2 to psycopg v3. novahub installs only
+# psycopg2-binary, so the next rebuild took 2.1.0 and every deploy died at db.py with
+# `ModuleNotFoundError: No module named 'psycopg'`. Production was down ~4 hours with nothing
+# in the repo changed and CI green on 2.0.36 throughout. novahub bounded it in its own
+# requirements.txt (#580) — and this file still carried the unbounded `sqlalchemy>=2.0`, so the
+# same trip-wire was re-armed for anyone installing a kernel extra.
+#
+# Latent rather than live when found: signal is the only consumer installing an extra
+# (`novahos[agents]`) and it pins `SQLAlchemy==2.0.36` itself, which is what was holding the
+# line. Every other spoke installs plain `novahos` and pulls none of this. The bound is here so
+# the next consumer to install an extra does not inherit a defused bomb and re-arm it.
+#
+# `litellm>=1.40,<2` was already bounded, which is how I know the pattern was understood and
+# sqlalchemy was simply missed. The rest are bounded to their next major on the same reasoning:
+# a major arriving unannounced on a rebuild nobody connected to a dependency is the failure, and
+# the fix is cheap. Raise a bound deliberately, with a suite run behind it.
+#
+# `dev` is deliberately LEFT unbounded. pytest and pytest-asyncio are test-time only: a major
+# there breaks the suite loudly and immediately, which is the opposite of the failure mode
+# above. What these bounds guard against is a dependency arriving unannounced on a REBUILD and
+# taking a service down with nothing in the repo changed. A tool that fails in front of you
+# needs no bound, and pinning dev tools mainly means nobody upgrades them.
 # Manifests: AgentManifest.from_file() parses YAML off disk. Deliberately its own extra —
 # a service that only READS manifests (reach does) should not have to install litellm, river
 # and sqlalchemy to do it, which is what `agents` would cost it.
-manifests = ["pyyaml>=6.0"]
+manifests = ["pyyaml>=6.0,<7"]
 # Substrate: DB + LLM gateway + learning + the WolfOS bridge.
 substrate = [
-    "sqlalchemy[asyncio]>=2.0",
-    "asyncpg>=0.29",
-    "pydantic-settings>=2.3",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "asyncpg>=0.29,<1",
+    "pydantic-settings>=2.3,<3",
     "litellm>=1.40,<2",
-    "river>=0.21",
-    "httpx>=0.27",
-    "pyyaml>=6.0",
+    "river>=0.21,<1",
+    "httpx>=0.27,<1",
+    "pyyaml>=6.0,<7",
 ]
 # Channels: posting backends (outbound).
-channels = ["httpx>=0.27"]
+channels = ["httpx>=0.27,<1"]
 # Sources: inbound connector backends (the mirror of channels).
-sources = ["httpx>=0.27"]
+sources = ["httpx>=0.27,<1"]
 # Agents: shared agents need the substrate + channels.
 agents = [
-    "sqlalchemy[asyncio]>=2.0",
-    "asyncpg>=0.29",
-    "pydantic-settings>=2.3",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "asyncpg>=0.29,<1",
+    "pydantic-settings>=2.3,<3",
     "litellm>=1.40,<2",
-    "river>=0.21",
-    "httpx>=0.27",
-    "pyyaml>=6.0",
+    "river>=0.21,<1",
+    "httpx>=0.27,<1",
+    "pyyaml>=6.0,<7",
 ]
 # Local transcription (optional even within agents — providers import lazily).
-transcribe = ["faster-whisper>=1.0"]
+transcribe = ["faster-whisper>=1.0,<2"]
 # Everything.
 all = [
-    "sqlalchemy[asyncio]>=2.0", "asyncpg>=0.29", "pydantic-settings>=2.3",
-    "litellm>=1.40,<2", "river>=0.21", "httpx>=0.27", "pyyaml>=6.0", "faster-whisper>=1.0",
+    "sqlalchemy[asyncio]>=2.0,<2.1", "asyncpg>=0.29,<1", "pydantic-settings>=2.3,<3",
+    "litellm>=1.40,<2", "river>=0.21,<1", "httpx>=0.27,<1", "pyyaml>=6.0,<7", "faster-whisper>=1.0,<2",
 ]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pyyaml>=6.0", "httpx>=0.27"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pyyaml>=6.0,<7", "httpx>=0.27,<1"]
 
 [tool.setuptools.packages.find]
 where = ["."]
