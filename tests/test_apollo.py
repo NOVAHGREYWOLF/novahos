@@ -1,9 +1,16 @@
 """APOLLO compose/rank are pure (no DB) — the shared content brain any app can call.
-LLM is monkeypatched so these run offline."""
+LLM is monkeypatched so these run offline.
+
+Skipped where the substrate extra is absent: curator and wordsmith import `novahos.llm`, which
+imports litellm and pydantic-settings at module scope, so a `[dev]`-only install cannot even
+collect this file."""
 import pytest
 
-from novahos.agents.apollo import curator, wordsmith
-from novahos.context import AgentContext
+pytest.importorskip("litellm", reason="novahos[substrate] not installed")
+pytest.importorskip("pydantic_settings", reason="novahos[substrate] not installed")
+
+from novahos.agents.apollo import curator, wordsmith  # noqa: E402
+from novahos.context import AgentContext  # noqa: E402
 
 
 def _ctx():

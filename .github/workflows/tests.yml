@@ -1,0 +1,116 @@
+# The kernel's first gate. Eleven services install this library; until now the only thing
+# that had ever run its tests was a desk typing `pytest` on one machine, against one Python,
+# with that machine's system site-packages satisfying every import. There were no workflows
+# in this repo at all — and an empty check set read as "green" is an absence, not a pass.
+#
+# TWO JOBS, AND THE FIRST IS THE ONE THAT EARNS ITS KEEP. `suite` runs under [dev], which
+# declares pyyaml, sqlalchemy and the rest, so every lazy import it touches is satisfied and
+# it can say nothing about a plain `novahos` install. `bare-import` installs NO extras, which
+# is the actual promise this package makes: zero core dependencies, stdlib rails.
+#
+# That is not a hypothetical distinction. On 2026-09-26 reach sat red for a day and scope
+# silently reported an EMPTY agent fleet to the hub registry, both because
+# AgentManifest.from_file lazy-imports PyYAML and plain `novahos` never installs it. The defect
+# was diagnosed twice at the wrong layer. `bare-import` would have caught it here, once,
+# instead of at each consumer as somebody happened to look. A `[dev]`-only gate would NOT
+# have: [dev] already declares pyyaml.
+#
+# PYTHON MATRIX, and it is not decoration. requires-python is >=3.11, and reach, signal and
+# echo all run 3.11 in their own CI while this kernel had only ever been measured on 3.12.
+# Testing the floor is testing what most consumers actually execute.
+#
+# RUNNER: needs a twelfth self-hosted container (`novahos`); eleven exist, one per repo. Until
+# NODE provisions it every job here queues forever, and a perpetually-pending check is worse
+# than no check because it reads as "still running" rather than "never ran". Merge this AFTER
+# the runner exists, not before.
+name: tests
+
+# `push` is scoped to main on purpose. Unscoped, a branch with an open PR fires BOTH triggers
+# and every run is done twice — 2x the work forever on a box whose documented failure mode is
+# contention (a runner once lost its heartbeat mid-suite while starved). With this split a PR
+# branch gets one run from `pull_request` and main gets one from `push`. The cost is that a
+# branch with no PR is ungated, which is the right trade: it is not going anywhere yet. Matches
+# what novahub's workflows already do.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# One run per ref. The box is sixteen cores shared with eleven runners and a ~5 Mbps link;
+# superseded runs should die rather than queue behind themselves.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bare-import:
+    name: bare import (no extras, py${{ matrix.python }})
+    runs-on: [self-hosted, novah]
+    # 30, not 10 and not the 360-minute default. A cold pip install crosses the same ~5 Mbps link
+    # the local pip volume exists to spare, so a 10-minute budget dies on a cache miss rather than
+    # on a real failure; leaving it unset lets a hung job sit for six hours looking busy. NODE
+    # measured both ends of that — see F:/novah/ci/NOTES.md.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          # NO `cache: pip` here, deliberately. On a self-hosted runner it fetches the Actions
+          # cache across the very link the mounted pip volume exists to avoid, and its post-job
+          # save has hung until the timeout killed an otherwise-green job. The runners already
+          # mount novah-pip-cache.
+      # `pip install .` with NO extras and NO -e, deliberately: this must exercise the
+      # INSTALLED distribution's metadata, not the source tree on sys.path. A source-tree
+      # run would pass while the built package was still missing a dependency.
+      #
+      # INTO A FRESH VENV, not the interpreter setup-python hands back. On these runners the
+      # toolcache under _work/_tool outlives the job, so a `pip install` into that interpreter
+      # lands in a site-packages the NEXT job on the same Python inherits. That is how run 8 went
+      # red: `pytest (py3.12)` installed [dev] (pyyaml included) into Python/3.12.14, and the
+      # later `bare import (py3.12)` found PyYAML importable and rightly refused. py3.11 passed
+      # only because its bare job happened to land first, on a freshly downloaded interpreter.
+      # A venv without --system-site-packages sees none of that, whatever order jobs run in.
+      - name: install the kernel with no extras
+        run: |
+          python -m venv --clear "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install .
+      # The script refuses (exit 2) rather than guessing if its own precondition is broken —
+      # if PyYAML turns out to be importable here, this job cannot test the promise and says
+      # so instead of reporting a pass. Non-zero fails the job either way, which is correct:
+      # "could not establish" must not be green.
+      - name: the zero-dependency promise
+        run: python scripts/check_no_extras.py
+
+  suite:
+    name: pytest (py${{ matrix.python }})
+    runs-on: [self-hosted, novah]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # Same fresh venv as bare-import, for the other half of the same reason: installing [dev]
+      # into the shared toolcache interpreter is what poisoned the bare job in the first place.
+      - name: install with dev extras
+        run: |
+          python -m venv --clear "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -e .[dev]
+      # BARE pytest. Not `pytest tests/`, not a -k sweep: a targeted sweep in this estate once
+      # silently deselected 5,239 tests and nearly reported a clean wall while four unrelated
+      # failures sat unexamined.
+      - name: pytest
+        run: python -m pytest -q
