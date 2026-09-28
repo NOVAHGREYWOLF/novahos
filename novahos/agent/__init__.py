@@ -8,6 +8,18 @@ is imported lazily, only when a manifest is loaded from a file).
 
 from __future__ import annotations
 
+from .autonomy import (
+    Abstention,
+    Autonomy,
+    AutonomyAdvice,
+    AutonomyAdvisor,
+    AutonomyThresholds,
+    Stakes,
+    abstain_or_proceed,
+    confidence_valve,
+    queue_score,
+    should_abstain,
+)
 from .base import Agent, AgentActionResult, Handler, OnboardingState
 from .manifest import AgentManifest, ManifestError, validate_manifest
 from .onboarding import OnboardingError, OnboardingProcess
@@ -25,4 +37,14 @@ __all__ = [
     "RegistryError",
     "OnboardingProcess",
     "OnboardingError",
+    "Autonomy",
+    "Stakes",
+    "AutonomyAdvisor",
+    "AutonomyAdvice",
+    "AutonomyThresholds",
+    "confidence_valve",
+    "Abstention",
+    "should_abstain",
+    "abstain_or_proceed",
+    "queue_score",
 ]
