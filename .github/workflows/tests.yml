@@ -67,10 +67,20 @@ jobs:
       # `pip install .` with NO extras and NO -e, deliberately: this must exercise the
       # INSTALLED distribution's metadata, not the source tree on sys.path. A source-tree
       # run would pass while the built package was still missing a dependency.
+      #
+      # INTO A FRESH VENV, not the interpreter setup-python hands back. On these runners the
+      # toolcache under _work/_tool outlives the job, so a `pip install` into that interpreter
+      # lands in a site-packages the NEXT job on the same Python inherits. That is how run 8 went
+      # red: `pytest (py3.12)` installed [dev] (pyyaml included) into Python/3.12.14, and the
+      # later `bare import (py3.12)` found PyYAML importable and rightly refused. py3.11 passed
+      # only because its bare job happened to land first, on a freshly downloaded interpreter.
+      # A venv without --system-site-packages sees none of that, whatever order jobs run in.
       - name: install the kernel with no extras
         run: |
-          python -m pip install --upgrade pip
-          pip install .
+          python -m venv --clear "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install .
       # The script refuses (exit 2) rather than guessing if its own precondition is broken —
       # if PyYAML turns out to be importable here, this job cannot test the promise and says
       # so instead of reporting a pass. Non-zero fails the job either way, which is correct:
@@ -91,10 +101,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # Same fresh venv as bare-import, for the other half of the same reason: installing [dev]
+      # into the shared toolcache interpreter is what poisoned the bare job in the first place.
       - name: install with dev extras
         run: |
-          python -m pip install --upgrade pip
-          pip install -e .[dev]
+          python -m venv --clear "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install -e .[dev]
       # BARE pytest. Not `pytest tests/`, not a -k sweep: a targeted sweep in this estate once
       # silently deselected 5,239 tests and nearly reported a clean wall while four unrelated
       # failures sat unexamined.
