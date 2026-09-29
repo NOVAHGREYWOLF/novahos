@@ -32,7 +32,7 @@ import traceback
 STDLIB_MODULES = (
     "auth", "constitution", "consent", "context", "knowledge", "mcp", "privacy",
     "service_auth", "service_client", "validators", "warden", "gateway_url", "audit_trail",
-    "warden_runtime.gate",
+    "warden_runtime.gate", "model_tiers",
 )
 
 #: Paths documented as lazily importing a third-party package. Each must fail with its OWN
