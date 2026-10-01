@@ -59,3 +59,16 @@ same files, so they never disagree. The board (ArtifactData) is a *view* synced 
 ## Handoff (from the design session)
 Done: session-budget kit merged (#24); board has RULE-session-budget, TEMPLATE-child-brief, TEMPLATE-babysit-brief.
 Next: build step 1 above in a fresh session reading this file. Ids: novahos main, board A4uS9xn1emqupohdE4DUfV.
+
+## Handoff (build step 1)
+Done: `conductor/plan.py` (+ `__init__.py`) and `tests/test_conductor_plan.py` (16 tests pass). Draft PR stacked on #25
+(base `claude/conductor-design`). Stdlib only; `route.py` is loaded by path, rules not duplicated.
+`conductor/` is NOT in `[tool.setuptools.packages.find] include` (novahos*, leadfuel_core*), so it does not ship in the
+installed package and cannot affect the `bare import` job; the test inserts the repo root on `sys.path`.
+Next: step 2, `conductor/report.py` (tasks.json -> report.md) + golden-file test, reading `plan.Task`/`plan.Project`.
+Gotchas:
+- `Task.model` holds the router's short name (`opus|sonnet|haiku`), not the full model id; `model_pin` is an extra optional
+  field (pin wins even when `model` is already set). Unknown task fields are rejected.
+- `ready_tasks` counts doing/pr/review tasks against `max_parallel`.
+- Valid envelopes: standard, production, critical, door; efforts: small, low, medium, high, xhigh.
+- `pip install pytest` may be needed in a fresh cloud session (not preinstalled).
