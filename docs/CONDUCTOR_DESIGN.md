@@ -141,3 +141,7 @@ Gotchas:
 - No external board (GitHub Projects etc.) is synced; there is deliberately no write-back.
 - PR stack: #25 <- #26 <- #27 <- #28 <- #29 <- #30 <- this PR; retarget each to main as the one below merges.
 - `conductor/` stays out of the setuptools include list; `pip install pytest` may be needed.
+
+## Follow-up: mark-done, import, auto-archive config
+`conductor.cloud` gained `mark-done TASK_ID... [--pr N]`, `import SESSIONS_JSON`, `config --auto-archive on|off` (+2 tests, 40 pass). The skill's /tick step 0 marks merged-PR tasks done,
+so `auto_archive` now has a path to fire. Gotchas: imported sessions are matched by session id only; auto-start still needs the routine in `docs/CONDUCTOR_ROUTINE.md` to be created.

@@ -9,6 +9,9 @@ CLI (JSON in/out, see the skill):
   python3 -m conductor.cloud start TASK_ID SESSION_ID
   python3 -m conductor.cloud status TASK_ID SESSION_JSON_FILE
   python3 -m conductor.cloud report
+  python3 -m conductor.cloud mark-done TASK_ID... [--pr N]
+  python3 -m conductor.cloud import SESSIONS_JSON_FILE
+  python3 -m conductor.cloud config --auto-archive on|off
   python3 -m conductor.cloud board        # writes .conductor/board.md (view only)
   python3 -m conductor.cloud publish-doc  # prints the docs `batch` payload for report.md
 """
@@ -20,7 +23,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .plan import Task, assign_models, load_project, load_tasks, save_tasks, validate, _load_router
+from .plan import (Task, assign_models, load_project, load_tasks, save_project, save_tasks, validate,
+                   _load_router)
 from .report import write_report
 from .tick import State, tick
 
@@ -108,6 +112,43 @@ def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     return t
 
 
+def mark_done(cdir: Path, task_ids: list[str], pr: str | int | None = None) -> list[Task]:
+    """Mark tasks `done` (their PR merged). Once done, a task with a session is an archive candidate, and with
+    auto_archive on the next plan emits `archive` for it."""
+    tasks = load_tasks(cdir / "tasks.json")
+    by_id = {t.id: t for t in tasks}
+    missing = [i for i in task_ids if i not in by_id]
+    if missing:
+        raise SystemExit(f"unknown task id(s): {', '.join(missing)}")
+    for i in task_ids:
+        by_id[i].status = "done"
+        if pr is not None and len(task_ids) == 1:
+            by_id[i].pr = pr
+    save_tasks(tasks, cdir / "tasks.json")
+    return [by_id[i] for i in task_ids]
+
+
+def import_sessions(cdir: Path, sessions: list[dict]) -> list[Task]:
+    """Adopt existing sessions (list_sessions rows: id/session_id, title, status_bucket) as tasks so the
+    conductor tracks and archives them. Already-tracked session ids are skipped. Imported tasks never start."""
+    tasks = load_tasks(cdir / "tasks.json") if (cdir / "tasks.json").exists() else []
+    known = {t.session_id for t in tasks} | {t.id for t in tasks}
+    added = []
+    for s in sessions:
+        sid = s.get("id") or s.get("session_id")
+        tid = f"s-{str(sid)[-8:]}"
+        if not sid or sid in known or tid in known:
+            continue
+        status = BUCKET_TO_STATUS.get(str(s.get("status_bucket")), "review")
+        t = Task(id=tid, title=str(s.get("title") or sid)[:120], status=status, session_id=sid,
+                 model_pin=None)
+        tasks.append(t)
+        added.append(t)
+        known.add(sid)
+    save_tasks(tasks, cdir / "tasks.json")
+    return added
+
+
 def render_report(cdir: Path) -> Path:
     write_report(cdir / "report.md", load_project(cdir / "project.json"), load_tasks(cdir / "tasks.json"))
     return cdir / "report.md"
@@ -127,6 +168,13 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("status")
     st.add_argument("task_id")
     st.add_argument("session_json")
+    md = sub.add_parser("mark-done")
+    md.add_argument("task_ids", nargs="+")
+    md.add_argument("--pr")
+    im = sub.add_parser("import")
+    im.add_argument("sessions_json", help="JSON list of sessions (list_sessions rows)")
+    cf = sub.add_parser("config")
+    cf.add_argument("--auto-archive", choices=["on", "off"])
     sub.add_parser("report")
     sub.add_parser("board")
     sub.add_parser("publish-doc")
@@ -139,6 +187,16 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "status":
         t = record_status(cdir, a.task_id, json.loads(Path(a.session_json).read_text()))
         out = {"task": t.id, "status": t.status, "context_tokens": t.context_tokens, "cost_usd": t.cost_usd}
+    elif a.cmd == "mark-done":
+        out = {"done": [t.id for t in mark_done(cdir, a.task_ids, a.pr)]}
+    elif a.cmd == "import":
+        out = {"imported": [t.id for t in import_sessions(cdir, json.loads(Path(a.sessions_json).read_text()))]}
+    elif a.cmd == "config":
+        proj = load_project(cdir / "project.json")
+        if a.auto_archive:
+            proj.auto_archive = a.auto_archive == "on"
+            save_project(proj, cdir / "project.json")
+        out = {"auto_archive": proj.auto_archive}
     elif a.cmd == "board":
         from .board import write_board
         out = {"board": str(write_board(cdir / "board.md", load_project(cdir / "project.json"), load_tasks(cdir / "tasks.json")))}

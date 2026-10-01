@@ -51,3 +51,25 @@ def test_cli(tmp_path, capsys):
     assert main(["--dir", str(c), "plan", "--repo-url", "u"]) == 0
     assert json.loads(capsys.readouterr().out)["spawns"][0]["task_id"] == "a"
     assert main(["--dir", str(c), "report"]) == 0
+
+
+def test_mark_done_then_auto_archive(tmp_path):
+    from conductor.cloud import mark_done
+    c = setup(tmp_path, [{"id": "a", "title": "x", "status": "review", "session_id": "S1"}], auto_archive=True)
+    assert plan_tick(c, "https://github.com/o/r")["archives"] == []
+    mark_done(c, ["a"], pr=7)
+    out = plan_tick(c, "https://github.com/o/r")
+    assert out["archives"] == [{"task_id": "a", "session_id": "S1"}]
+    assert load_tasks(c / "tasks.json")[0].pr == 7
+
+
+def test_import_sessions_and_config(tmp_path, capsys):
+    from conductor.cloud import import_sessions
+    c = setup(tmp_path, [])
+    rows = [{"id": "session_abcdef12", "title": "old work", "status_bucket": "working"}, {"id": "session_zzzzzzzz"}]
+    assert [t.status for t in import_sessions(c, rows)] == ["doing", "review"]
+    assert import_sessions(c, rows) == []  # idempotent
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps([]))
+    assert main(["--dir", str(c), "config", "--auto-archive", "on"]) == 0
+    assert '"auto_archive": true' in capsys.readouterr().out
