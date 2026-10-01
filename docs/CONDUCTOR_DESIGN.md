@@ -58,6 +58,7 @@ same files, so they never disagree. The board (ArtifactData) is a *view* synced 
 - Pre-approval via `extra_allowed_tools` is unproven (spawned sessions may stop on a permission prompt), so reporting is pull-first: the tick reads each session's latest `STATUS:` line with `list_events`.
 - Routines need connectors set in the claude.ai routines UI (`create_trigger`'s `connectors` parameter is not available for this org); see `CONDUCTOR_ROUTINE.md`.
 - The kit is not on main until the stack merges (PRs are stacked on `claude/conductor-done`).
+- Size numbers in the older handoff sections (reuse under 60k, handoff at 100k, hard stop 150k, plan budget 100k/150k) are superseded by the owner's 2026-10-01 policy: reuse an idle session under 200k (Haiku 150k), guard soft 300k / hard 450k, project budget set per project in `project.json` (leadfuel-reports: soft 5M / hard 8M). The plan.py default budget is still 100k/150k, so a new project must set its own.
 
 ## Handoff (from the design session)
 Done: session-budget kit merged (#24); board has RULE-session-budget, TEMPLATE-child-brief, TEMPLATE-babysit-brief.
