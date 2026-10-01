@@ -14,7 +14,7 @@ No polling, no wake-ups, no PR subscriptions: one tick = one pass, then stop.
 2. Run the tick below once.
 
 ## /tick
--1. First, read YOUR OWN `get_session` (no id) and its `external_metadata.context_usage.used_tokens`. At 90k: write a handoff note (`handoff` skill), spawn a successor with `create_session` carrying that note, and ask the owner to confirm before archiving yourself. Do not archive yourself unasked. Then stop; do not run the tick.
+-1. First, read YOUR OWN `get_session` (no id) and its `external_metadata.context_usage.used_tokens`. At 200k: write a handoff note (`handoff` skill), spawn a successor with `create_session` carrying that note, and ask the owner to confirm before archiving yourself. Do not archive yourself unasked. Then stop; do not run the tick.
 0. For each task in `review` with a `pr`: check the PR with the GitHub tool; if merged, `python3 -m conductor.cloud mark-done <task_id> --pr <n>`. That is what lets `auto_archive` act.
 1. `python3 -m conductor.cloud plan --repo-url <repo url> --revision <branch> [--brief-dir DIR]` (default `.conductor/briefs`) -> JSON `{spawns, reuses, archives, archive_candidates, handoffs, stops}`. If `<brief-dir>/<task id>.md` exists it is appended to that task's prompt under "FULL BRIEF". Starts are already claimed (`doing`), so a second tick will not repeat them.
 2. For each `spawns[i]`: call `create_session` with its `create_session` object as-is (model, source_url, source_revision, tags, title, prompt). Then `python3 -m conductor.cloud start <task_id> <new session id>`.
@@ -28,7 +28,7 @@ No polling, no wake-ups, no PR subscriptions: one tick = one pass, then stop.
 ## Rules
 - Model choice comes from the router (`route-and-spawn`); never override it here. Briefs follow `TEMPLATE-child-brief` via `child_brief()`.
 - A `failed`/`blocked` session marks the task `blocked`; retry only by the escalation rule in `route-and-spawn`, in a new tick.
-- Never force-push, never print secrets, never spawn from inside a child task session. Check your own `used_tokens` and hand off per the `handoff` skill at 90k.
+- Never force-push, never print secrets, never spawn from inside a child task session. Check your own `used_tokens` and hand off per the `handoff` skill at 200k.
 
 ## /board and /publish-report (view only)
 - `python3 -m conductor.cloud board` writes `.conductor/board.md` from tasks.json. It never writes back to tasks or any board.

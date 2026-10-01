@@ -41,13 +41,13 @@ def test_unknown_when_no_usage_or_missing_file(tmp_path):
 
 
 def test_decide_thresholds_and_throttle():
-    assert guard.decide(99_000, 0, 100_000, 150_000) == (None, 0)
-    msg, last = guard.decide(101_000, 0, 100_000, 150_000)
-    assert "handoff" in msg and "HARD" not in msg and last == 101_000
-    assert guard.decide(105_000, last, 100_000, 150_000) == (None, last)  # inside the re-warn window
-    msg, _ = guard.decide(112_000, last, 100_000, 150_000)
+    assert guard.decide(299_000, 0, 300_000, 450_000) == (None, 0)
+    msg, last = guard.decide(301_000, 0, 300_000, 450_000)
+    assert "handoff" in msg and "HARD" not in msg and last == 301_000
+    assert guard.decide(305_000, last, 300_000, 450_000) == (None, last)  # inside the re-warn window
+    msg, _ = guard.decide(312_000, last, 300_000, 450_000)
     assert msg
-    msg, _ = guard.decide(160_000, 0, 100_000, 150_000)
+    msg, _ = guard.decide(460_000, 0, 300_000, 450_000)
     assert "HARD CAP" in msg
 
 
@@ -62,3 +62,10 @@ def test_router_rules():
     assert r({"title": "Wire the thing", "effort": "medium", "envelope": "production"})["model"] == "sonnet"
     assert r({"title": "x", "effort": "high", "model_pin": "sonnet"})["model"] == "sonnet"
     assert r({})["model"] == "sonnet"
+
+
+def test_hook_defaults_match_policy_module():
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from conductor import policy
+    assert (guard.SOFT_DEFAULT, guard.HARD_DEFAULT) == (policy.SESSION_SOFT, policy.SESSION_HARD)
