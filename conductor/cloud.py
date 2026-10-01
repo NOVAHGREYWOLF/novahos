@@ -23,8 +23,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .plan import (Task, assign_models, load_project, load_tasks, save_project, save_tasks, validate,
-                   _load_router)
+from .plan import (Task, assign_models, effective_lane, load_project, load_tasks, save_project, save_tasks,
+                   validate, _load_router)
 from .report import write_report
 from .tick import State, tick
 
@@ -65,11 +65,16 @@ def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: i
         if a.kind == "start_fresh":
             t = by_id[a.task_id]
             model = t.model or "sonnet"
+            lane = effective_lane(project, t)
+            tags = ["conductor", f"project:{project.slug}", "role:task", f"task:{t.id}", f"model:{model}"]
+            title = f"Conductor {project.slug}: {t.id} {t.title}"
+            if lane:  # the sidebar groups by lane: mirror it as a tag and as the "LANE · " title prefix
+                tags.append(f"lane:{lane}")
+                title = f"{lane} \u00b7 {t.id} {t.title}"
             spawns.append({"task_id": t.id, "create_session": {
                 "model": ids[model], "source_url": repo_url, "source_revision": revision,
-                "tags": ["conductor", f"project:{project.slug}", "role:task", f"task:{t.id}", f"model:{model}"],
-                "extra_allowed_tools": list(CHILD_ALLOWED_TOOLS),
-                "title": f"Conductor {project.slug}: {t.id} {t.title}"[:200], "prompt": child_brief(t)}})
+                "tags": tags, "extra_allowed_tools": list(CHILD_ALLOWED_TOOLS),
+                "title": title[:200], "prompt": child_brief(t)}})
         elif a.kind == "start_reuse":
             reuses.append({"task_id": a.task_id, "session_id": a.session_id,
                            "send_message": child_brief(by_id[a.task_id])})

@@ -109,3 +109,54 @@ def test_waiting_on_permission_is_blocked(tmp_path):
     assert record_status(c, "a", nested).status == "blocked"
     c2 = setup(tmp_path / "x", [{"id": "b", "title": "t", "status": "done", "session_id": "session_2"}])
     assert record_status(c2, "b", waiting).status == "done"  # a merged task never goes back to blocked
+
+
+def test_spawn_payload_carries_lane_tag_and_title_prefix(tmp_path):
+    c = setup(tmp_path, [{"id": "P1", "title": "reports pipeline", "lane": "INTELLIGENCE"},
+                         {"id": "G2", "title": "gateway cutover", "lane": "MONEY"}], slug="lf")
+    spawns = {s["task_id"]: s["create_session"] for s in plan_tick(c, "https://github.com/o/r")["spawns"]}
+    p1, g2 = spawns["P1"], spawns["G2"]
+    assert p1["tags"] == ["conductor", "project:lf", "role:task", "task:P1", "model:sonnet", "lane:INTELLIGENCE"]
+    assert g2["tags"][-1] == "lane:MONEY"
+    assert p1["title"] == "INTELLIGENCE \u00b7 P1 reports pipeline"
+    assert g2["title"] == "MONEY \u00b7 G2 gateway cutover"
+    assert p1["extra_allowed_tools"] == ["mcp__claude-code-remote__send_message"]
+
+
+def test_project_default_lane_and_task_override_in_payload(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "inherits"}, {"id": "b", "title": "overrides", "lane": "ROUTER"}],
+              slug="lf", lane="MONEY")
+    spawns = {s["task_id"]: s["create_session"] for s in plan_tick(c, "https://github.com/o/r")["spawns"]}
+    assert "lane:MONEY" in spawns["a"]["tags"] and "lane:ROUTER" not in spawns["a"]["tags"]
+    assert spawns["a"]["title"] == "MONEY \u00b7 a inherits"
+    assert "lane:ROUTER" in spawns["b"]["tags"] and "lane:MONEY" not in spawns["b"]["tags"]
+    assert spawns["b"]["title"] == "ROUTER \u00b7 b overrides"
+    assert sum(t.startswith("lane:") for t in spawns["b"]["tags"]) == 1
+
+
+def test_no_lane_leaves_tags_and_title_unchanged(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "fix typo", "effort": "small"}], slug="lf")
+    cs = plan_tick(c, "https://github.com/o/r")["spawns"][0]["create_session"]
+    assert cs["tags"] == ["conductor", "project:lf", "role:task", "task:a", "model:haiku"]
+    assert cs["title"] == "Conductor lf: a fix typo"
+
+
+def test_laned_title_is_capped_at_200(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "x" * 500, "lane": "BRAIN"}])
+    title = plan_tick(c, "https://github.com/o/r")["spawns"][0]["create_session"]["title"]
+    assert len(title) == 200 and title.startswith("BRAIN \u00b7 a x")
+
+
+def test_invalid_lane_stops_the_plan(tmp_path):
+    import pytest
+    from conductor.plan import PlanError
+    c = setup(tmp_path, [{"id": "a", "title": "t", "lane": "nope"}])
+    with pytest.raises(PlanError, match="invalid lane"):
+        plan_tick(c, "https://github.com/o/r")
+
+
+def test_lane_survives_claiming_and_status_updates(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "t", "lane": "VAULT"}])
+    plan_tick(c, "https://github.com/o/r")
+    record_status(c, "a", {"id": "session_1", "status_bucket": "working"})
+    assert load_tasks(c / "tasks.json")[0].lane == "VAULT"

@@ -14,6 +14,10 @@ from typing import Any
 STATUSES = ("todo", "doing", "pr", "review", "done", "blocked")
 EFFORTS = ("small", "low", "medium", "high", "xhigh")
 ENVELOPES = ("standard", "production", "critical", "door")
+# The owner groups sessions in the Claude app sidebar by lane. The API has no group field, so a spawned
+# session mirrors its lane as the tag `lane:<NAME>` and as a "NAME · " title prefix. Case-sensitive.
+LANES = ("ROUTER", "SENSORS", "DOORS", "INTELLIGENCE", "ARMS", "NODE", "SURFACE", "LAB", "MONEY", "VAULT",
+         "SUITE", "ROUNDTRIP", "COMMS", "FIELD", "PRIVACY", "PRODUCT", "WATCH", "MARKET", "BRAIN", "WEBSITES")
 
 ROUTE_PATH = Path(__file__).resolve().parent.parent / ".claude" / "skills" / "route-and-spawn" / "route.py"
 
@@ -35,6 +39,7 @@ class Project:
     goal: str
     auto_archive: bool = False
     budget: Budget = field(default_factory=Budget)
+    lane: str | None = None  # default lane for tasks that do not set their own
 
 
 @dataclass
@@ -51,6 +56,19 @@ class Task:
     pr: str | int | None = None
     cost_usd: float = 0.0
     context_tokens: int = 0
+    lane: str | None = None  # overrides the project's default lane
+
+
+def lane_error(lane: Any, where: str) -> str | None:
+    """None when `lane` is None or an allowed lane name; otherwise a one-line error for `where`."""
+    if lane is None or (isinstance(lane, str) and lane in LANES):
+        return None
+    return f"{where}: invalid lane {lane!r} (one of {', '.join(LANES)}; upper-case)"
+
+
+def effective_lane(project: Project, task: Task) -> str | None:
+    """The task's own lane, else the project's default lane, else None."""
+    return task.lane or project.lane
 
 
 # ---------------------------------------------------------------- load / save
@@ -68,9 +86,11 @@ def project_from_dict(d: dict[str, Any]) -> Project:
         errs.append("project: budget.soft and budget.hard must be positive integers")
     elif soft > hard:
         errs.append(f"project: budget.soft ({soft}) must not exceed budget.hard ({hard})")
+    if (e := lane_error(d.get("lane"), "project")):
+        errs.append(e)
     if errs:
         raise PlanError("\n".join(errs))
-    return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), Budget(soft, hard))
+    return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), Budget(soft, hard), d.get("lane"))
 
 
 def task_from_dict(d: dict[str, Any]) -> Task:
@@ -100,13 +120,21 @@ def load_tasks(path: str | Path) -> list[Task]:
     return tasks
 
 
+def _plain(obj: Project | Task) -> dict[str, Any]:
+    """asdict, minus an unset lane so files that never used lanes stay byte-identical."""
+    d = asdict(obj)
+    if d.get("lane") is None:
+        d.pop("lane", None)
+    return d
+
+
 def save_project(project: Project, path: str | Path) -> None:
-    Path(path).write_text(json.dumps(asdict(project), indent=2) + "\n")
+    Path(path).write_text(json.dumps(_plain(project), indent=2) + "\n")
 
 
 def save_tasks(tasks: list[Task], path: str | Path) -> None:
     validate(tasks)
-    Path(path).write_text(json.dumps([asdict(t) for t in tasks], indent=2) + "\n")
+    Path(path).write_text(json.dumps([_plain(t) for t in tasks], indent=2) + "\n")
 
 
 # ------------------------------------------------------------------ validate
@@ -125,6 +153,8 @@ def validate(tasks: list[Task]) -> None:
             errs.append(f"task {t.id!r}: invalid effort {t.effort!r} (one of {', '.join(EFFORTS)})")
         if t.envelope not in ENVELOPES:
             errs.append(f"task {t.id!r}: invalid envelope {t.envelope!r} (one of {', '.join(ENVELOPES)})")
+        if (e := lane_error(t.lane, f"task {t.id!r}")):
+            errs.append(e)
         if not isinstance(t.depends, list):
             errs.append(f"task {t.id!r}: 'depends' must be a list")
             continue
