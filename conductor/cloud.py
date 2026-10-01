@@ -9,6 +9,9 @@ CLI (JSON in/out, see the skill):
   python3 -m conductor.cloud start TASK_ID SESSION_ID
   python3 -m conductor.cloud status TASK_ID SESSION_JSON_FILE
   python3 -m conductor.cloud report
+  python3 -m conductor.cloud mark-done TASK_ID... [--pr N]
+  python3 -m conductor.cloud import SESSIONS_JSON_FILE
+  python3 -m conductor.cloud config --auto-archive on|off
   python3 -m conductor.cloud board        # writes .conductor/board.md (view only)
   python3 -m conductor.cloud publish-doc  # prints the docs `batch` payload for report.md
 """
@@ -20,18 +23,29 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .plan import Task, assign_models, load_project, load_tasks, save_tasks, validate, _load_router
+from .plan import (Task, assign_models, effective_lane, load_project, load_tasks, save_project, save_tasks,
+                   validate, _load_router)
 from .report import write_report
 from .tick import State, tick
 
 BUCKET_TO_STATUS = {"working": "doing", "review_ready": "review", "completed": "review",
                     "blocked": "blocked", "failed": "blocked"}
+# A child stopped on a permission prompt cannot send STATUS, so the tick reads it from the session instead.
+WAITING_ON_PERMISSION = "Waiting on permission"
+# Pre-approves the child's STATUS report; entries the spawner lacks are dropped by create_session.
+CHILD_ALLOWED_TOOLS = ["mcp__claude-code-remote__send_message"]
+
+
+def _bucket(raw: Any) -> str:
+    """'SESSION_STATUS_BUCKET_WORKING' (as list_sessions returns it) or 'working' -> 'working'."""
+    return str(raw).lower().removeprefix("session_status_bucket_")
 
 
 def child_brief(task: Task) -> str:
+    haiku = " This is a Haiku task: keep it under 150k tokens." if task.model == "haiku" else ""
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
             "One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
-            "100k tokens, hard stop 150k. No polling, no wake-ups, never archive sessions, never force-push. "
+            f"300k tokens, hard stop 450k.{haiku} No polling, no wake-ups, never archive sessions, never force-push. "
             "Write a short handoff and stop when done or blocked.")
 
 
@@ -50,10 +64,17 @@ def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: i
     for a in actions:
         if a.kind == "start_fresh":
             t = by_id[a.task_id]
+            model = t.model or "sonnet"
+            lane = effective_lane(project, t)
+            tags = ["conductor", f"project:{project.slug}", "role:task", f"task:{t.id}", f"model:{model}"]
+            title = f"Conductor {project.slug}: {t.id} {t.title}"
+            if lane:  # the sidebar groups by lane: mirror it as a tag and as the "LANE · " title prefix
+                tags.append(f"lane:{lane}")
+                title = f"{lane} \u00b7 {t.id} {t.title}"
             spawns.append({"task_id": t.id, "create_session": {
-                "model": ids[t.model or "sonnet"], "source_url": repo_url, "source_revision": revision,
-                "tags": ["conductor", f"task:{t.id}", f"model:{t.model}"],
-                "title": f"Conductor {project.slug}: {t.id} {t.title}"[:200], "prompt": child_brief(t)}})
+                "model": ids[model], "source_url": repo_url, "source_revision": revision,
+                "tags": tags, "extra_allowed_tools": list(CHILD_ALLOWED_TOOLS),
+                "title": title[:200], "prompt": child_brief(t)}})
         elif a.kind == "start_reuse":
             reuses.append({"task_id": a.task_id, "session_id": a.session_id,
                            "send_message": child_brief(by_id[a.task_id])})
@@ -91,10 +112,14 @@ def _dig(d: Any, *paths: str) -> Any:
 
 def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     """Fold a get_session result into the task: status from status_bucket, context from context_usage,
-    cost if the result carries one. Missing fields leave the task's values alone."""
+    cost if the result carries one. Missing fields leave the task's values alone. A session whose
+    post_turn_summary.status_detail starts with "Waiting on permission" is `blocked`: it cannot report."""
     tasks = load_tasks(cdir / "tasks.json")
     t = next(t for t in tasks if t.id == task_id)
-    status = BUCKET_TO_STATUS.get(str(session.get("status_bucket")))
+    status = BUCKET_TO_STATUS.get(_bucket(session.get("status_bucket")))
+    detail = _dig(session, "post_turn_summary.status_detail", "external_metadata.post_turn_summary.status_detail")
+    if isinstance(detail, str) and detail.lstrip().startswith(WAITING_ON_PERMISSION):
+        status = "blocked"
     if status and t.status != "done":
         t.status = status
     tokens = _dig(session, "context_usage.used_tokens", "context_tokens")
@@ -106,6 +131,43 @@ def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     t.session_id = session.get("id") or session.get("session_id") or t.session_id
     save_tasks(tasks, cdir / "tasks.json")
     return t
+
+
+def mark_done(cdir: Path, task_ids: list[str], pr: str | int | None = None) -> list[Task]:
+    """Mark tasks `done` (their PR merged). Once done, a task with a session is an archive candidate, and with
+    auto_archive on the next plan emits `archive` for it."""
+    tasks = load_tasks(cdir / "tasks.json")
+    by_id = {t.id: t for t in tasks}
+    missing = [i for i in task_ids if i not in by_id]
+    if missing:
+        raise SystemExit(f"unknown task id(s): {', '.join(missing)}")
+    for i in task_ids:
+        by_id[i].status = "done"
+        if pr is not None and len(task_ids) == 1:
+            by_id[i].pr = pr
+    save_tasks(tasks, cdir / "tasks.json")
+    return [by_id[i] for i in task_ids]
+
+
+def import_sessions(cdir: Path, sessions: list[dict]) -> list[Task]:
+    """Adopt existing sessions (list_sessions rows: id/session_id, title, status_bucket) as tasks so the
+    conductor tracks and archives them. Already-tracked session ids are skipped. Imported tasks never start."""
+    tasks = load_tasks(cdir / "tasks.json") if (cdir / "tasks.json").exists() else []
+    known = {t.session_id for t in tasks} | {t.id for t in tasks}
+    added = []
+    for s in sessions:
+        sid = s.get("id") or s.get("session_id")
+        tid = f"s-{str(sid)[-8:]}"
+        if not sid or sid in known or tid in known:
+            continue
+        status = BUCKET_TO_STATUS.get(_bucket(s.get("status_bucket")), "review")
+        t = Task(id=tid, title=str(s.get("title") or sid)[:120], status=status, session_id=sid,
+                 model_pin=None)
+        tasks.append(t)
+        added.append(t)
+        known.add(sid)
+    save_tasks(tasks, cdir / "tasks.json")
+    return added
 
 
 def render_report(cdir: Path) -> Path:
@@ -127,6 +189,13 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("status")
     st.add_argument("task_id")
     st.add_argument("session_json")
+    md = sub.add_parser("mark-done")
+    md.add_argument("task_ids", nargs="+")
+    md.add_argument("--pr")
+    im = sub.add_parser("import")
+    im.add_argument("sessions_json", help="JSON list of sessions (list_sessions rows)")
+    cf = sub.add_parser("config")
+    cf.add_argument("--auto-archive", choices=["on", "off"])
     sub.add_parser("report")
     sub.add_parser("board")
     sub.add_parser("publish-doc")
@@ -139,6 +208,16 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "status":
         t = record_status(cdir, a.task_id, json.loads(Path(a.session_json).read_text()))
         out = {"task": t.id, "status": t.status, "context_tokens": t.context_tokens, "cost_usd": t.cost_usd}
+    elif a.cmd == "mark-done":
+        out = {"done": [t.id for t in mark_done(cdir, a.task_ids, a.pr)]}
+    elif a.cmd == "import":
+        out = {"imported": [t.id for t in import_sessions(cdir, json.loads(Path(a.sessions_json).read_text()))]}
+    elif a.cmd == "config":
+        proj = load_project(cdir / "project.json")
+        if a.auto_archive:
+            proj.auto_archive = a.auto_archive == "on"
+            save_project(proj, cdir / "project.json")
+        out = {"auto_archive": proj.auto_archive}
     elif a.cmd == "board":
         from .board import write_board
         out = {"board": str(write_board(cdir / "board.md", load_project(cdir / "project.json"), load_tasks(cdir / "tasks.json")))}
