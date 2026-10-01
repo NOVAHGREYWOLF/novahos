@@ -73,3 +73,11 @@ def test_import_sessions_and_config(tmp_path, capsys):
     f.write_text(json.dumps([]))
     assert main(["--dir", str(c), "config", "--auto-archive", "on"]) == 0
     assert '"auto_archive": true' in capsys.readouterr().out
+
+
+def test_import_accepts_prefixed_buckets(tmp_path):
+    from conductor.cloud import import_sessions
+    c = setup(tmp_path, [])
+    rows = [{"id": "session_aaaaaaaa", "status_bucket": "SESSION_STATUS_BUCKET_WORKING"},
+            {"id": "session_bbbbbbbb", "status_bucket": "SESSION_STATUS_BUCKET_FAILED"}]
+    assert [t.status for t in import_sessions(c, rows)] == ["doing", "blocked"]

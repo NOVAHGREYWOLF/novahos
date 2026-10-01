@@ -32,6 +32,11 @@ BUCKET_TO_STATUS = {"working": "doing", "review_ready": "review", "completed": "
                     "blocked": "blocked", "failed": "blocked"}
 
 
+def _bucket(raw: Any) -> str:
+    """'SESSION_STATUS_BUCKET_WORKING' (as list_sessions returns it) or 'working' -> 'working'."""
+    return str(raw).lower().removeprefix("session_status_bucket_")
+
+
 def child_brief(task: Task) -> str:
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
             "One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
@@ -98,7 +103,7 @@ def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     cost if the result carries one. Missing fields leave the task's values alone."""
     tasks = load_tasks(cdir / "tasks.json")
     t = next(t for t in tasks if t.id == task_id)
-    status = BUCKET_TO_STATUS.get(str(session.get("status_bucket")))
+    status = BUCKET_TO_STATUS.get(_bucket(session.get("status_bucket")))
     if status and t.status != "done":
         t.status = status
     tokens = _dig(session, "context_usage.used_tokens", "context_tokens")
@@ -139,7 +144,7 @@ def import_sessions(cdir: Path, sessions: list[dict]) -> list[Task]:
         tid = f"s-{str(sid)[-8:]}"
         if not sid or sid in known or tid in known:
             continue
-        status = BUCKET_TO_STATUS.get(str(s.get("status_bucket")), "review")
+        status = BUCKET_TO_STATUS.get(_bucket(s.get("status_bucket")), "review")
         t = Task(id=tid, title=str(s.get("title") or sid)[:120], status=status, session_id=sid,
                  model_pin=None)
         tasks.append(t)
