@@ -84,3 +84,16 @@ Gotchas:
 - Blocked tasks are auto-added to "Open items"; tasks without a model group under `unassigned`.
 - Regenerate the golden by deleting the fixture and running the test once (it writes it when missing); review the diff.
 - Cost numbers use `$x,xxx.xx` and tokens `x,xxx`; changing formats means regenerating the golden.
+
+## Handoff (build step 3)
+Done: `conductor/tick.py` (`State(project, tasks, max_parallel=3)`, frozen `Action(kind, task_id, session_id, reason)`,
+`tick(state) -> list[Action]`, helpers `archive_candidates`, `budget_level`) and `tests/test_conductor_tick.py` (7 tests; 28 pass with plan/report).
+Pure, stdlib only, no I/O or clock. Draft PR stacked on #27 (base `claude/conductor-report`); retarget as #25/#26/#27 merge.
+Action kinds, in order: `stop_soft|stop_hard`, then `archive` (only if `auto_archive` true) or `archive_candidate` (list only), then `start_reuse|start_fresh`.
+Rules: reuse = task has `session_id` and `context_tokens` < 60,000, else fresh; soft budget (sum of context_tokens > soft) blocks new starts, hard blocks them too and is reported as `stop_hard` (runner should also halt in-flight work); exactly at the limit is not exceeded (same as report.py).
+Next: step 4, local runner: `claude -p --model X --max-turns N --output-format json` executor, git worktree per task, capture `total_cost_usd`/usage into `cost_usd`/`context_tokens`, apply tick actions, write tasks.json + report.md. Smoke test on a toy repo (no network in unit tests: inject the executor).
+Gotchas:
+- `start_reuse` for a `todo` task assumes a prior session exists; the runner decides how to resume it (`claude -p --resume` locally).
+- `tick` does not mutate tasks or set `doing`; the runner must record starts itself or the next tick will re-select them.
+- `ready_tasks` caps by max_parallel minus in-flight, so a tick during a stop emits no starts at all.
+- Keep `conductor/` out of setuptools `include`; tests insert the repo root on `sys.path`.
