@@ -27,6 +27,19 @@ def test_plan_spawns_claims_and_does_not_repeat(tmp_path):
     assert (c / "report.md").exists()
 
 
+def test_spawn_payload_tags_and_pre_approved_tool(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "fix typo", "effort": "small"},
+                         {"id": "b", "title": "wire the thing"}], slug="my-proj")
+    spawns = {s["task_id"]: s["create_session"] for s in plan_tick(c, "https://github.com/o/r")["spawns"]}
+    assert spawns["a"]["tags"] == ["conductor", "project:my-proj", "role:task", "task:a", "model:haiku"]
+    assert spawns["b"]["tags"] == ["conductor", "project:my-proj", "role:task", "task:b", "model:sonnet"]
+    for cs in spawns.values():
+        assert cs["extra_allowed_tools"] == ["mcp__claude-code-remote__send_message"]
+    # the brief carries the owner's size policy (2026-10-01), and Haiku gets its tighter cap
+    assert "handoff at 300k tokens, hard stop 450k" in spawns["b"]["prompt"] and "Haiku" not in spawns["b"]["prompt"]
+    assert "handoff at 300k tokens, hard stop 450k" in spawns["a"]["prompt"] and "under 150k tokens" in spawns["a"]["prompt"]
+
+
 def test_reuse_archive_and_budget(tmp_path):
     c = setup(tmp_path, [{"id": "a", "title": "t", "status": "done", "session_id": "session_1"},
                          {"id": "b", "title": "t", "session_id": "session_2", "context_tokens": 10}], auto_archive=True)
@@ -81,3 +94,18 @@ def test_import_accepts_prefixed_buckets(tmp_path):
     rows = [{"id": "session_aaaaaaaa", "status_bucket": "SESSION_STATUS_BUCKET_WORKING"},
             {"id": "session_bbbbbbbb", "status_bucket": "SESSION_STATUS_BUCKET_FAILED"}]
     assert [t.status for t in import_sessions(c, rows)] == ["doing", "blocked"]
+
+
+def test_waiting_on_permission_is_blocked(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "t", "status": "doing", "session_id": "session_1"}])
+    working = {"status_bucket": "working", "context_usage": {"used_tokens": 5000}}
+    waiting = {**working, "post_turn_summary": {"status_detail": "Waiting on permission to run send_message"}}
+    t = record_status(c, "a", waiting)
+    assert t.status == "blocked" and t.context_tokens == 5000  # blocked, and the rest of the session still folds in
+    assert record_status(c, "a", working).status == "doing"  # unblocked once the detail is gone
+    other = {**working, "post_turn_summary": {"status_detail": "Running the tests"}}
+    assert record_status(c, "a", other).status == "doing"
+    nested = {"status_bucket": "working", "external_metadata": {"post_turn_summary": {"status_detail": "Waiting on permission"}}}
+    assert record_status(c, "a", nested).status == "blocked"
+    c2 = setup(tmp_path / "x", [{"id": "b", "title": "t", "status": "done", "session_id": "session_2"}])
+    assert record_status(c2, "b", waiting).status == "done"  # a merged task never goes back to blocked

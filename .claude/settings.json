@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": ["mcp__claude-code-remote__send_message"]
+  },
+  "env": {
+    "SESSION_SOFT_TOKENS": "300000",
+    "SESSION_HARD_TOKENS": "450000"
+  },
   "hooks": {
     "PostToolUse": [
       { "hooks": [ { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\"" } ] }

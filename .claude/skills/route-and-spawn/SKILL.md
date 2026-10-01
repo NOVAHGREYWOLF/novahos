@@ -8,7 +8,7 @@ description: Coordinator skill. Pick the cheapest safe model for a board task an
 For coordinators only. Goal: every task runs in a **small, fresh session on the cheapest model that is safe**.
 
 ## 1. Reuse or fresh?
-Call `get_session` on the candidate. Reuse an idle session only if `context_usage.used_tokens` < 60k **and** it is the same repo and area. Otherwise start fresh. Never wake a session over 100k for new work.
+Call `get_session` on the candidate. Reuse an idle session only if `context_usage.used_tokens` < 200k (< 150k for a Haiku task) **and** it is the same repo and area. Otherwise start fresh. Never wake a session over 300k for new work.
 
 ## 2. Pick the model
 ```
@@ -17,7 +17,7 @@ python3 .claude/skills/route-and-spawn/route.py '{"title":"<task title>","effort
 Returns `{"model","model_id","reason"}`. Rules: Opus for `critical`/`door` envelopes, high/xhigh effort, or security/auth/migration/architecture/rewrite in the title; Haiku for small/low mechanical work (sweeps, typos, docs, display text); Sonnet otherwise. Override by setting `model_pin` on the task, and say why on the task. If a Sonnet/Haiku session fails the same step twice, escalate one tier for the retry, not before.
 
 ## 3. Spawn
-`create_session` with `model` = the returned `model_id`, the repo as `source_url`, tags `["<task id>", "model:<name>"]`, and the brief from board doc `TEMPLATE-child-brief` (fill task id, one-line goal, done-criteria). One task, one session, one PR. Prefer a task that fits in ~80k tokens; split anything larger on the board first.
+`create_session` with `model` = the returned `model_id`, the repo as `source_url`, tags `["project:<slug>", "role:task", "task:<id>", "model:<name>"]`, `extra_allowed_tools: ["mcp__claude-code-remote__send_message"]`, and the brief from board doc `TEMPLATE-child-brief` (fill task id, one-line goal, done-criteria). One task, one session, one PR. Prefer a task that fits in ~80k tokens; split anything larger on the board first.
 
 ## 4. Record
 On the board task write `session_id`, `model`, `model_id`, `started_at`; on finish write `context_tokens` and `cost_usd` from `get_session`. Those fields are what lets us see where credits go.

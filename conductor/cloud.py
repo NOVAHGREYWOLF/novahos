@@ -30,6 +30,10 @@ from .tick import State, tick
 
 BUCKET_TO_STATUS = {"working": "doing", "review_ready": "review", "completed": "review",
                     "blocked": "blocked", "failed": "blocked"}
+# A child stopped on a permission prompt cannot send STATUS, so the tick reads it from the session instead.
+WAITING_ON_PERMISSION = "Waiting on permission"
+# Pre-approves the child's STATUS report; entries the spawner lacks are dropped by create_session.
+CHILD_ALLOWED_TOOLS = ["mcp__claude-code-remote__send_message"]
 
 
 def _bucket(raw: Any) -> str:
@@ -38,9 +42,10 @@ def _bucket(raw: Any) -> str:
 
 
 def child_brief(task: Task) -> str:
+    haiku = " This is a Haiku task: keep it under 150k tokens." if task.model == "haiku" else ""
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
             "One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
-            "100k tokens, hard stop 150k. No polling, no wake-ups, never archive sessions, never force-push. "
+            f"300k tokens, hard stop 450k.{haiku} No polling, no wake-ups, never archive sessions, never force-push. "
             "Write a short handoff and stop when done or blocked.")
 
 
@@ -59,9 +64,11 @@ def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: i
     for a in actions:
         if a.kind == "start_fresh":
             t = by_id[a.task_id]
+            model = t.model or "sonnet"
             spawns.append({"task_id": t.id, "create_session": {
-                "model": ids[t.model or "sonnet"], "source_url": repo_url, "source_revision": revision,
-                "tags": ["conductor", f"task:{t.id}", f"model:{t.model}"],
+                "model": ids[model], "source_url": repo_url, "source_revision": revision,
+                "tags": ["conductor", f"project:{project.slug}", "role:task", f"task:{t.id}", f"model:{model}"],
+                "extra_allowed_tools": list(CHILD_ALLOWED_TOOLS),
                 "title": f"Conductor {project.slug}: {t.id} {t.title}"[:200], "prompt": child_brief(t)}})
         elif a.kind == "start_reuse":
             reuses.append({"task_id": a.task_id, "session_id": a.session_id,
@@ -100,10 +107,14 @@ def _dig(d: Any, *paths: str) -> Any:
 
 def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     """Fold a get_session result into the task: status from status_bucket, context from context_usage,
-    cost if the result carries one. Missing fields leave the task's values alone."""
+    cost if the result carries one. Missing fields leave the task's values alone. A session whose
+    post_turn_summary.status_detail starts with "Waiting on permission" is `blocked`: it cannot report."""
     tasks = load_tasks(cdir / "tasks.json")
     t = next(t for t in tasks if t.id == task_id)
     status = BUCKET_TO_STATUS.get(_bucket(session.get("status_bucket")))
+    detail = _dig(session, "post_turn_summary.status_detail", "external_metadata.post_turn_summary.status_detail")
+    if isinstance(detail, str) and detail.lstrip().startswith(WAITING_ON_PERMISSION):
+        status = "blocked"
     if status and t.status != "done":
         t.status = status
     tokens = _dig(session, "context_usage.used_tokens", "context_tokens")
