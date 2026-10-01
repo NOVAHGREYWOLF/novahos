@@ -8,7 +8,7 @@ description: Coordinator skill. Pick the cheapest safe model for a board task an
 For coordinators only. Goal: every task runs in a **small, fresh session on the cheapest model that is safe**.
 
 ## 1. Reuse or fresh?
-Call `get_session` on the candidate. Reuse an idle session only if `context_usage.used_tokens` < 60k **and** it is the same repo and area. Otherwise start fresh. Never wake a session over 100k for new work.
+Call `get_session` on the candidate. Reuse an idle session only if `context_usage.used_tokens` < 200k **and** it is the same repo and area. Otherwise start fresh. Never wake a session over 300k for new work. Keep Haiku tasks under 150k (its window is 200k).
 
 ## 2. Pick the model
 ```
@@ -26,4 +26,4 @@ On the board task write `session_id`, `model`, `model_id`, `started_at`; on fini
 After a child opens a PR it hands off and stops. If CI goes red, start a **new small session** (Sonnet) with a two-line brief: repo, PR number, "make CI green, minimal fix, then stop". Do not wake the original session.
 
 ## 6. Every work block
-Check your own `used_tokens`. At 90k write your coordinator handoff (see `handoff` skill) and start a successor.
+Check your own `used_tokens`. At 200k write your coordinator handoff (see `handoff` skill) and start a successor.

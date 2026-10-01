@@ -5,7 +5,7 @@ get_session / send_message / archive_session calls; this module decides what to 
 results in .conductor/tasks.json. Sessions replace worktrees; tick() is reused unchanged.
 
 CLI (JSON in/out, see the skill):
-  python3 -m conductor.cloud plan  [--repo-url U] [--revision R] [--max-parallel N]
+  python3 -m conductor.cloud plan  [--repo-url U] [--revision R] [--max-parallel N] [--brief-dir DIR]
   python3 -m conductor.cloud start TASK_ID SESSION_ID
   python3 -m conductor.cloud status TASK_ID SESSION_JSON_FILE
   python3 -m conductor.cloud report
@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import policy
 from .plan import (Task, assign_models, load_project, load_tasks, save_project, save_tasks, validate,
                    _load_router)
 from .report import write_report
@@ -37,14 +38,30 @@ def _bucket(raw: Any) -> str:
     return str(raw).lower().removeprefix("session_status_bucket_")
 
 
-def child_brief(task: Task) -> str:
+DEFAULT_BRIEF_DIR = ".conductor/briefs"
+HANDOFF_REQUEST = ("Your context is past the per-session soft limit. Write a short handoff note (done, next, gotchas) "
+                   "and stop. Do not start new work.")
+
+
+def child_brief(task: Task, brief_dir: str | Path | None = None) -> str:
+    """Generic rules plus, when <brief_dir>/<task.id>.md exists, the full brief under a FULL BRIEF heading."""
+    text = _generic_brief(task)
+    if brief_dir is not None and not any(c in task.id for c in "/\\") and not task.id.startswith("."):
+        f = Path(brief_dir) / f"{task.id}.md"
+        if f.is_file():
+            text += f"\n\n## FULL BRIEF\n\n{f.read_text().strip()}\n"
+    return text
+
+
+def _generic_brief(task: Task) -> str:
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
-            "One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
-            "100k tokens, hard stop 150k. No polling, no wake-ups, never archive sessions, never force-push. "
+            f"One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
+            f"{policy.SESSION_SOFT // 1000}k tokens, hard stop {policy.SESSION_HARD // 1000}k. No polling, no wake-ups, never archive sessions, never force-push. "
             "Write a short handoff and stop when done or blocked.")
 
 
-def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: int = 3, claim: bool = True) -> dict:
+def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: int = 3, claim: bool = True,
+              brief_dir: str | Path | None = None) -> dict:
     """Run tick() and translate it into session calls. Claimed starts are saved as `doing` before returning,
     so a repeated tick never re-selects them (same rule as the local runner)."""
     project = load_project(cdir / "project.json")
@@ -55,21 +72,24 @@ def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: i
     ids = _load_router().IDS
     actions = tick(State(project, tasks, max_parallel))
 
-    spawns, reuses, archives, candidates, stops = [], [], [], [], []
+    spawns, reuses, archives, candidates, stops, handoffs = [], [], [], [], [], []
     for a in actions:
         if a.kind == "start_fresh":
             t = by_id[a.task_id]
             spawns.append({"task_id": t.id, "create_session": {
                 "model": ids[t.model or "sonnet"], "source_url": repo_url, "source_revision": revision,
                 "tags": ["conductor", f"task:{t.id}", f"model:{t.model}"],
-                "title": f"Conductor {project.slug}: {t.id} {t.title}"[:200], "prompt": child_brief(t)}})
+                "title": f"Conductor {project.slug}: {t.id} {t.title}"[:200], "prompt": child_brief(t, brief_dir)}})
         elif a.kind == "start_reuse":
             reuses.append({"task_id": a.task_id, "session_id": a.session_id,
-                           "send_message": child_brief(by_id[a.task_id])})
+                           "send_message": child_brief(by_id[a.task_id], brief_dir)})
         elif a.kind == "archive":
             archives.append({"task_id": a.task_id, "session_id": a.session_id})
         elif a.kind == "archive_candidate":
             candidates.append({"task_id": a.task_id, "session_id": a.session_id})
+        elif a.kind == "handoff_due":
+            handoffs.append({"task_id": a.task_id, "session_id": a.session_id, "send_message": HANDOFF_REQUEST,
+                             "reason": a.reason})
         elif a.kind.startswith("stop_"):
             stops.append({"kind": a.kind, "reason": a.reason})
     if claim and (spawns or reuses):
@@ -77,7 +97,8 @@ def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: i
             by_id[s["task_id"]].status = "doing"
         save_tasks(tasks, tasks_path)
     write_report(cdir / "report.md", project, tasks, open_items=[f"{s['kind']}: {s['reason']}" for s in stops])
-    return {"spawns": spawns, "reuses": reuses, "archives": archives, "archive_candidates": candidates, "stops": stops}
+    return {"spawns": spawns, "reuses": reuses, "archives": archives, "archive_candidates": candidates, "handoffs": handoffs,
+            "stops": stops}
 
 
 def record_start(cdir: Path, task_id: str, session_id: str) -> Task:
@@ -98,19 +119,32 @@ def _dig(d: Any, *paths: str) -> Any:
     return None
 
 
+FINISHED_BUCKETS = ("completed", "review_ready", "failed")
+
+
 def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     """Fold a get_session result into the task: status from status_bucket, context from context_usage,
-    cost if the result carries one. Missing fields leave the task's values alone."""
+    cost if the result carries one. Missing fields leave the task's values alone.
+
+    The live record is wrapped as {"ccr": {...}} with the numbers under external_metadata; flat records
+    still work. A 0 from a session that is not finished (used_tokens reads 0 mid-turn) never replaces a
+    larger recorded value.
+    """
+    if isinstance(session.get("ccr"), dict):
+        session = session["ccr"]
     tasks = load_tasks(cdir / "tasks.json")
     t = next(t for t in tasks if t.id == task_id)
-    status = BUCKET_TO_STATUS.get(_bucket(session.get("status_bucket")))
+    bucket = _bucket(session.get("status_bucket"))
+    status = BUCKET_TO_STATUS.get(bucket)
     if status and t.status != "done":
         t.status = status
-    tokens = _dig(session, "context_usage.used_tokens", "context_tokens")
-    if tokens is not None:
+    finished = bucket in FINISHED_BUCKETS
+    tokens = _dig(session, "external_metadata.context_usage.used_tokens", "context_usage.used_tokens",
+                  "context_tokens")
+    if tokens is not None and (finished or int(tokens) > 0 or not t.context_tokens):
         t.context_tokens = int(tokens)
-    cost = _dig(session, "cost_usd", "usage.cost_usd", "total_cost_usd")
-    if cost is not None:
+    cost = _dig(session, "external_metadata.usage.cost_usd", "cost_usd", "usage.cost_usd", "total_cost_usd")
+    if cost is not None and (finished or float(cost) > 0 or not t.cost_usd):
         t.cost_usd = float(cost)
     t.session_id = session.get("id") or session.get("session_id") or t.session_id
     save_tasks(tasks, cdir / "tasks.json")
@@ -146,7 +180,7 @@ def import_sessions(cdir: Path, sessions: list[dict]) -> list[Task]:
             continue
         status = BUCKET_TO_STATUS.get(_bucket(s.get("status_bucket")), "review")
         t = Task(id=tid, title=str(s.get("title") or sid)[:120], status=status, session_id=sid,
-                 model_pin=None)
+                 model_pin=None, adopted=True)
         tasks.append(t)
         added.append(t)
         known.add(sid)
@@ -167,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--repo-url", required=True)
     p.add_argument("--revision", default="main")
     p.add_argument("--max-parallel", type=int, default=3)
+    p.add_argument("--brief-dir", default=DEFAULT_BRIEF_DIR, help="dir of <task id>.md full briefs (gitignore it in a public repo)")
     s = sub.add_parser("start")
     s.add_argument("task_id")
     s.add_argument("session_id")
@@ -186,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     cdir = Path(a.dir)
     if a.cmd == "plan":
-        out: Any = plan_tick(cdir, a.repo_url, a.revision, a.max_parallel)
+        out: Any = plan_tick(cdir, a.repo_url, a.revision, a.max_parallel, brief_dir=a.brief_dir)
     elif a.cmd == "start":
         out = {"task": record_start(cdir, a.task_id, a.session_id).id, "status": "doing"}
     elif a.cmd == "status":

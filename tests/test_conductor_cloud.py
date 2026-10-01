@@ -81,3 +81,61 @@ def test_import_accepts_prefixed_buckets(tmp_path):
     rows = [{"id": "session_aaaaaaaa", "status_bucket": "SESSION_STATUS_BUCKET_WORKING"},
             {"id": "session_bbbbbbbb", "status_bucket": "SESSION_STATUS_BUCKET_FAILED"}]
     assert [t.status for t in import_sessions(c, rows)] == ["doing", "blocked"]
+
+
+LIVE_RECORD = {"ccr": {
+    "id": "session_0000000000000001", "session_status": "idle",
+    "status_bucket": "SESSION_STATUS_BUCKET_REVIEW_READY", "tags": ["conductor"],
+    "external_metadata": {"context_usage": {"max_tokens": 1000000, "used_tokens": 54321},
+                          "usage": {"cost_usd": 2.25, "input_tokens": 10, "output_tokens": 20}}}}
+
+
+def test_record_status_live_wrapped_record(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "t"}])
+    t = record_status(c, "a", LIVE_RECORD)
+    assert (t.status, t.context_tokens, t.cost_usd) == ("review", 54321, 2.25)
+    assert t.session_id == "session_0000000000000001"
+
+
+def test_record_status_zero_mid_turn_keeps_larger_value(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "t", "context_tokens": 70000, "cost_usd": 3.0}])
+    running = {"ccr": {"id": "s", "status_bucket": "SESSION_STATUS_BUCKET_WORKING",
+                       "external_metadata": {"context_usage": {"used_tokens": 0}, "usage": {"cost_usd": 0}}}}
+    t = record_status(c, "a", running)
+    assert (t.context_tokens, t.cost_usd) == (70000, 3.0)
+    done = {"ccr": {"id": "s", "status_bucket": "SESSION_STATUS_BUCKET_COMPLETED",
+                    "external_metadata": {"context_usage": {"used_tokens": 0}}}}
+    assert record_status(c, "a", done).context_tokens == 0  # a finished session's value is taken as-is
+
+
+def test_child_brief_appends_full_brief(tmp_path):
+    from conductor.cloud import child_brief
+    from conductor.plan import Task
+    task = Task(id="a", title="t")
+    assert "FULL BRIEF" not in child_brief(task) and "FULL BRIEF" not in child_brief(task, tmp_path)
+    (tmp_path / "a.md").write_text("Design: do the thing.\n")
+    out = child_brief(task, tmp_path)
+    assert out.startswith("Conductor task a: t") and "## FULL BRIEF" in out and out.rstrip().endswith("Design: do the thing.")
+    assert "FULL BRIEF" not in child_brief(Task(id="../a", title="t"), tmp_path / "x")
+
+
+def test_plan_brief_dir_flag_reaches_prompt(tmp_path, capsys):
+    c = setup(tmp_path, [{"id": "a", "title": "t"}])
+    (c / "briefs").mkdir()
+    (c / "briefs" / "a.md").write_text("SECRET-FREE DESIGN TEXT")
+    assert main(["--dir", str(c), "plan", "--repo-url", "u", "--brief-dir", str(c / "briefs")]) == 0
+    assert "SECRET-FREE DESIGN TEXT" in json.loads(capsys.readouterr().out)["spawns"][0]["create_session"]["prompt"]
+
+
+def test_handoff_due_in_plan_output(tmp_path):
+    c = setup(tmp_path, [{"id": "a", "title": "t", "status": "doing", "session_id": "S", "context_tokens": 320000}])
+    out = plan_tick(c, "u")
+    assert [h["session_id"] for h in out["handoffs"]] == ["S"] and "handoff" in out["handoffs"][0]["send_message"]
+
+
+def test_import_marks_adopted_and_frees_slots(tmp_path):
+    from conductor.cloud import import_sessions
+    c = setup(tmp_path, [{"id": "n", "title": "new work"}])
+    rows = [{"id": f"session_{i:08d}", "status_bucket": "review_ready"} for i in range(10)]
+    assert all(t.adopted for t in import_sessions(c, rows))
+    assert [s["task_id"] for s in plan_tick(c, "u", max_parallel=1)["spawns"]] == ["n"]

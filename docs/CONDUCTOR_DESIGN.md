@@ -12,7 +12,7 @@ same files, so they never disagree. The board (ArtifactData) is a *view* synced 
 
 ```
 .conductor/
-  project.json     name, slug, goal, auto_archive (default false), budget {soft:100000, hard:150000}
+  project.json     name, slug, goal, auto_archive (default false), budget {soft:5000000, hard:8000000} (project total), optional per_session {soft:300000, hard:450000, reuse_below:200000}; defaults live in conductor/policy.py
   tasks.json       [{id, title, effort, envelope, depends[], model, status, session_id, pr, cost_usd, context_tokens}]
   handoffs/<task>.md   the handoff note per task (see the `handoff` skill)
   report.md        living project doc, regenerated every tick; final report on completion
@@ -54,7 +54,7 @@ same files, so they never disagree. The board (ArtifactData) is a *view* synced 
 - Haiku routing untested on real tasks; backtest sends none of 49 past tasks to Haiku.
 - Hook behaviour in `create_session` sessions: unverified.
 - The install of the kit into the other repos is blocked on `add_repo` permission (session_013enoai3KJ3s6X4ZKUcHpW3).
-- Weekly limit reset: 2026-10-03 21:00 UTC; ticks must stay on Sonnet/Haiku.
+- Weekly limit reset: 2026-10-03 21:00 UTC; the Sonnet/Haiku-only hold on ticks was lifted by the owner on 2026-10-01.
 
 ## Handoff (from the design session)
 Done: session-budget kit merged (#24); board has RULE-session-budget, TEMPLATE-child-brief, TEMPLATE-babysit-brief.
@@ -145,3 +145,19 @@ Gotchas:
 ## Follow-up: mark-done, import, auto-archive config
 `conductor.cloud` gained `mark-done TASK_ID... [--pr N]`, `import SESSIONS_JSON`, `config --auto-archive on|off` (+2 tests, 40 pass). The skill's /tick step 0 marks merged-PR tasks done,
 so `auto_archive` now has a path to fire. Gotchas: imported sessions are matched by session id only; auto-start still needs the routine in `docs/CONDUCTOR_ROUTINE.md` to be created.
+
+## Handoff (CND-1: defect fixes)
+- `get_session` live shape: `{"ccr": {id, session_status, status_bucket (prefixed SESSION_STATUS_BUCKET_), tags, external_metadata{context_usage{max_tokens, used_tokens}, usage{cost_usd, input_tokens, output_tokens}}}}`.
+  `record_status` unwraps `ccr`, reads `external_metadata.*`, still accepts flat records, and never replaces a recorded value with a 0 from a session that is not finished (used_tokens reads 0 mid-turn).
+- Child briefs: `child_brief(task, brief_dir)` appends `<brief_dir>/<task id>.md` under "FULL BRIEF"; `plan --brief-dir DIR` (default `.conductor/briefs`). No Task field. A PUBLIC repo must gitignore the briefs dir (briefs may hold private details); a private repo can track it.
+- Budgets: `project.budget` is the project TOTAL (stop_soft/stop_hard). New optional `project.per_session {soft: 100000, hard: 150000}` is per session: a tracked doing/pr/review task above soft emits `handoff_due` (runner sends a short message asking for a handoff note and stop; `plan` output key `handoffs`), above hard `stop_session` (listed only, never interrupts). Neither blocks starts.
+- Runner self-handoff: at the start of every /tick the runner reads its own `get_session`; at 90k used_tokens it writes a handoff, spawns a successor with `create_session`, and asks the owner to confirm before archiving itself.
+- `import` sets `Task.adopted = true`; adopted tasks do not count against `max_parallel`.
+
+## Handoff (size policy)
+- Owner decision 2026-10-01: weekly usage is low, so sessions are bigger. Supersedes the 60k/90k/100k/150k numbers in the older sections above.
+- Single source of truth: `conductor/policy.py`. Session soft 300k ("finish the step, hand off") / hard 450k ("stop now"); reuse an idle session below 200k, never wake one over 300k; Haiku tasks under 150k; project total (sum of context tokens) soft 5M / hard 8M; coordinator/tick self-handoff at 200k.
+- Per project override in `.conductor/project.json`: `budget {soft, hard}` (total) and `per_session {soft, hard, reuse_below}` (the key #34 introduced; `reuse_below` is new). Missing keys fall back to `policy.py`, so older project.json files keep working. `save_project` nests `reuse_below` under `per_session`.
+- `.claude/hooks/context_guard.py` is copied into other repos so it cannot import `policy.py`: it keeps its own `SOFT_DEFAULT`/`HARD_DEFAULT` (300k/450k) and still reads `SESSION_SOFT_TOKENS` / `SESSION_HARD_TOKENS`; `tests/test_session_budget.py` fails if the two drift.
+- Stacked on #34 (CND-1), whose head it branches from. Max parallel: the code default is still 3 (`plan --max-parallel`); the owner's 8 is a routine/CLI setting, not changed here. Model routing is unchanged; the Sonnet/Haiku-only hold is lifted.
+- Gotchas: `.conductor/project.json` in this repo was moved to the new total budget (5M/8M); the old 100k/150k there was the project total, which the per-session meaning of #34 made wrong anyway. The context-guard hook still fired at the old 100k default while this was written, because the hook change is not merged yet.

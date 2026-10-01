@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import policy
+
 STATUSES = ("todo", "doing", "pr", "review", "done", "blocked")
 EFFORTS = ("small", "low", "medium", "high", "xhigh")
 ENVELOPES = ("standard", "production", "critical", "door")
@@ -24,8 +26,8 @@ class PlanError(ValueError):
 
 @dataclass
 class Budget:
-    soft: int = 100_000
-    hard: int = 150_000
+    soft: int = policy.PROJECT_SOFT
+    hard: int = policy.PROJECT_HARD
 
 
 @dataclass
@@ -34,7 +36,9 @@ class Project:
     slug: str
     goal: str
     auto_archive: bool = False
-    budget: Budget = field(default_factory=Budget)
+    budget: Budget = field(default_factory=Budget)  # project TOTAL across all tasks
+    per_session: Budget = field(default_factory=lambda: Budget(policy.SESSION_SOFT, policy.SESSION_HARD))
+    reuse_below: int = policy.REUSE_BELOW  # per_session.reuse_below: reuse an idle session only under this
 
 
 @dataclass
@@ -51,6 +55,7 @@ class Task:
     pr: str | int | None = None
     cost_usd: float = 0.0
     context_tokens: int = 0
+    adopted: bool = False  # picked up by `import`; never counts against max_parallel
 
 
 # ---------------------------------------------------------------- load / save
@@ -62,15 +67,24 @@ def project_from_dict(d: dict[str, Any]) -> Project:
             errs.append(f"project: '{key}' is required and must be a non-empty string")
     if not isinstance(d.get("auto_archive", False), bool):
         errs.append("project: 'auto_archive' must be true or false")
-    b = d.get("budget") or {}
-    soft, hard = b.get("soft", Budget.soft), b.get("hard", Budget.hard)
-    if not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (soft, hard)):
-        errs.append("project: budget.soft and budget.hard must be positive integers")
-    elif soft > hard:
-        errs.append(f"project: budget.soft ({soft}) must not exceed budget.hard ({hard})")
+    limits = {}
+    defaults = {"budget": (policy.PROJECT_SOFT, policy.PROJECT_HARD),
+                "per_session": (policy.SESSION_SOFT, policy.SESSION_HARD)}
+    for key in ("budget", "per_session"):
+        b = d.get(key) or {}
+        soft, hard = b.get("soft", defaults[key][0]), b.get("hard", defaults[key][1])
+        if not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (soft, hard)):
+            errs.append(f"project: {key}.soft and {key}.hard must be positive integers")
+        elif soft > hard:
+            errs.append(f"project: {key}.soft ({soft}) must not exceed {key}.hard ({hard})")
+        limits[key] = Budget(soft, hard)
+    reuse = (d.get("per_session") or {}).get("reuse_below", policy.REUSE_BELOW)
+    if not (isinstance(reuse, int) and not isinstance(reuse, bool) and reuse > 0):
+        errs.append("project: per_session.reuse_below must be a positive integer")
     if errs:
         raise PlanError("\n".join(errs))
-    return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), Budget(soft, hard))
+    return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), limits["budget"],
+                   limits["per_session"], reuse)
 
 
 def task_from_dict(d: dict[str, Any]) -> Task:
@@ -101,7 +115,9 @@ def load_tasks(path: str | Path) -> list[Task]:
 
 
 def save_project(project: Project, path: str | Path) -> None:
-    Path(path).write_text(json.dumps(asdict(project), indent=2) + "\n")
+    d = asdict(project)
+    d["per_session"]["reuse_below"] = d.pop("reuse_below")  # project.json nests it under per_session
+    Path(path).write_text(json.dumps(d, indent=2) + "\n")
 
 
 def save_tasks(tasks: list[Task], path: str | Path) -> None:
@@ -169,10 +185,11 @@ def _find_cycle(tasks: list[Task]) -> list[str] | None:
 def ready_tasks(tasks: list[Task], max_parallel: int) -> list[Task]:
     """Todo tasks whose depends are all done, in plan order, capped by free slots.
 
-    Tasks already in flight (doing/pr/review) count against max_parallel.
+    Tasks already in flight (doing/pr/review) count against max_parallel, except adopted ones
+    (imported sessions), which are tracked but never occupy a slot.
     """
     by_id = {t.id: t for t in tasks}
-    in_flight = sum(t.status in ("doing", "pr", "review") for t in tasks)
+    in_flight = sum(t.status in ("doing", "pr", "review") and not t.adopted for t in tasks)
     slots = max(0, max_parallel - in_flight)
     ready = [t for t in tasks if t.status == "todo" and all(by_id[d].status == "done" for d in t.depends)]
     return ready[:slots]

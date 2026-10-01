@@ -21,7 +21,7 @@ def test_valid_plan_loads(tmp_path):
         {"id": "b", "title": "B", "depends": ["a"], "effort": "high", "envelope": "critical"},
     ]))
     p = plan.load_project(tmp_path / "project.json")
-    assert (p.auto_archive, p.budget.soft, p.budget.hard) == (False, 100_000, 150_000)
+    assert (p.auto_archive, p.budget.soft, p.budget.hard) == (False, 5_000_000, 8_000_000)
     tasks = plan.load_tasks(tmp_path / "tasks.json")
     assert [t.id for t in tasks] == ["a", "b"] and tasks[0].status == "todo"
 
@@ -102,3 +102,9 @@ def test_save_load_round_trip(tmp_path):
     proj = plan.Project("P", "p", "g", True, plan.Budget(1, 2))
     plan.save_project(proj, tmp_path / "project.json")
     assert plan.load_project(tmp_path / "project.json") == proj
+
+
+def test_adopted_tasks_do_not_count_in_flight():
+    tasks = [T("a", status="review", adopted=True), T("b", status="doing", adopted=True), T("c"), T("d"),
+             T("e", status="doing")]
+    assert [t.id for t in plan.ready_tasks(tasks, 2)] == ["c"]  # only e holds a slot
