@@ -102,3 +102,9 @@ def test_save_load_round_trip(tmp_path):
     proj = plan.Project("P", "p", "g", True, plan.Budget(1, 2))
     plan.save_project(proj, tmp_path / "project.json")
     assert plan.load_project(tmp_path / "project.json") == proj
+
+
+def test_adopted_tasks_do_not_count_in_flight():
+    tasks = [T("a", status="review", adopted=True), T("b", status="doing", adopted=True), T("c"), T("d"),
+             T("e", status="doing")]
+    assert [t.id for t in plan.ready_tasks(tasks, 2)] == ["c"]  # only e holds a slot

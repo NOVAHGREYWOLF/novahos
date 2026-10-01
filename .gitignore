@@ -21,3 +21,6 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Conductor full briefs may hold private details; a public repo must not track them
+.conductor/briefs/

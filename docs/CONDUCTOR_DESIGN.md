@@ -145,3 +145,11 @@ Gotchas:
 ## Follow-up: mark-done, import, auto-archive config
 `conductor.cloud` gained `mark-done TASK_ID... [--pr N]`, `import SESSIONS_JSON`, `config --auto-archive on|off` (+2 tests, 40 pass). The skill's /tick step 0 marks merged-PR tasks done,
 so `auto_archive` now has a path to fire. Gotchas: imported sessions are matched by session id only; auto-start still needs the routine in `docs/CONDUCTOR_ROUTINE.md` to be created.
+
+## Handoff (CND-1: defect fixes)
+- `get_session` live shape: `{"ccr": {id, session_status, status_bucket (prefixed SESSION_STATUS_BUCKET_), tags, external_metadata{context_usage{max_tokens, used_tokens}, usage{cost_usd, input_tokens, output_tokens}}}}`.
+  `record_status` unwraps `ccr`, reads `external_metadata.*`, still accepts flat records, and never replaces a recorded value with a 0 from a session that is not finished (used_tokens reads 0 mid-turn).
+- Child briefs: `child_brief(task, brief_dir)` appends `<brief_dir>/<task id>.md` under "FULL BRIEF"; `plan --brief-dir DIR` (default `.conductor/briefs`). No Task field. A PUBLIC repo must gitignore the briefs dir (briefs may hold private details); a private repo can track it.
+- Budgets: `project.budget` is the project TOTAL (stop_soft/stop_hard). New optional `project.per_session {soft: 100000, hard: 150000}` is per session: a tracked doing/pr/review task above soft emits `handoff_due` (runner sends a short message asking for a handoff note and stop; `plan` output key `handoffs`), above hard `stop_session` (listed only, never interrupts). Neither blocks starts.
+- Runner self-handoff: at the start of every /tick the runner reads its own `get_session`; at 90k used_tokens it writes a handoff, spawns a successor with `create_session`, and asks the owner to confirm before archiving itself.
+- `import` sets `Task.adopted = true`; adopted tasks do not count against `max_parallel`.

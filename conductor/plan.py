@@ -34,7 +34,8 @@ class Project:
     slug: str
     goal: str
     auto_archive: bool = False
-    budget: Budget = field(default_factory=Budget)
+    budget: Budget = field(default_factory=Budget)  # project TOTAL across all tasks
+    per_session: Budget = field(default_factory=Budget)  # one session: handoff at soft, stop at hard
 
 
 @dataclass
@@ -51,6 +52,7 @@ class Task:
     pr: str | int | None = None
     cost_usd: float = 0.0
     context_tokens: int = 0
+    adopted: bool = False  # picked up by `import`; never counts against max_parallel
 
 
 # ---------------------------------------------------------------- load / save
@@ -62,15 +64,19 @@ def project_from_dict(d: dict[str, Any]) -> Project:
             errs.append(f"project: '{key}' is required and must be a non-empty string")
     if not isinstance(d.get("auto_archive", False), bool):
         errs.append("project: 'auto_archive' must be true or false")
-    b = d.get("budget") or {}
-    soft, hard = b.get("soft", Budget.soft), b.get("hard", Budget.hard)
-    if not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (soft, hard)):
-        errs.append("project: budget.soft and budget.hard must be positive integers")
-    elif soft > hard:
-        errs.append(f"project: budget.soft ({soft}) must not exceed budget.hard ({hard})")
+    limits = {}
+    for key in ("budget", "per_session"):
+        b = d.get(key) or {}
+        soft, hard = b.get("soft", Budget.soft), b.get("hard", Budget.hard)
+        if not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (soft, hard)):
+            errs.append(f"project: {key}.soft and {key}.hard must be positive integers")
+        elif soft > hard:
+            errs.append(f"project: {key}.soft ({soft}) must not exceed {key}.hard ({hard})")
+        limits[key] = Budget(soft, hard)
     if errs:
         raise PlanError("\n".join(errs))
-    return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), Budget(soft, hard))
+    return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), limits["budget"],
+                   limits["per_session"])
 
 
 def task_from_dict(d: dict[str, Any]) -> Task:
@@ -169,10 +175,11 @@ def _find_cycle(tasks: list[Task]) -> list[str] | None:
 def ready_tasks(tasks: list[Task], max_parallel: int) -> list[Task]:
     """Todo tasks whose depends are all done, in plan order, capped by free slots.
 
-    Tasks already in flight (doing/pr/review) count against max_parallel.
+    Tasks already in flight (doing/pr/review) count against max_parallel, except adopted ones
+    (imported sessions), which are tracked but never occupy a slot.
     """
     by_id = {t.id: t for t in tasks}
-    in_flight = sum(t.status in ("doing", "pr", "review") for t in tasks)
+    in_flight = sum(t.status in ("doing", "pr", "review") and not t.adopted for t in tasks)
     slots = max(0, max_parallel - in_flight)
     ready = [t for t in tasks if t.status == "todo" and all(by_id[d].status == "done" for d in t.depends)]
     return ready[:slots]
