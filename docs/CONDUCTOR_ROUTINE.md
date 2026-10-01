@@ -5,7 +5,7 @@ coordinator context. In the session taxonomy (`CONDUCTOR_DESIGN.md`), a routine-
 
 | Routine | Id | Schedule | Does |
 | --- | --- | --- | --- |
-| Conductor hourly tick | `trig_015prRzaktsxeYJLiD7x8G9B` | hourly, at minute :36 | Runs `/tick` for the conductor plan: TOOLS CHECK, rate-limit check, pull-first status reads, merged-PR `mark-done`, red-CI report, plan, spawn/reuse, archive by the single gate, ungrouped list. |
+| Conductor hourly tick | `trig_015prRzaktsxeYJLiD7x8G9B` | hourly, at minute :36 | Runs `/tick` for the conductor plan: TOOLS CHECK, rate-limit check, pull-first status reads, merged-PR `mark-done`, red-CI report, plan, spawn/reuse, archive by the single gate. |
 | Conductor nightly | `trig_01U9CpzgkUWKbLeymJ46qmuA` | daily, 20:07 PT | TOOLS CHECK, then the close-out: applies the same archive gate (skips already-archived sessions), lists ungrouped sessions, stores the two Briefcase documents, and opens a draft PR with the sanitized public copy. Contract: "Daily report contract" in `CONDUCTOR_DESIGN.md`. |
 
 Paused: the 4-hourly novahos tick `trig_01SXmjamu3JKRDbFyVvvHtGN` (router, 22:17 UTC) is `enabled=false`.

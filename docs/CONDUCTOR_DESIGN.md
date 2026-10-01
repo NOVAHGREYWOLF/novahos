@@ -168,7 +168,7 @@ Roles:
 - `report`: a session whose job is a report or briefing block.
 - `scratch`: smoke tests, throwaway pings, experiments. Never part of a plan.
 
-A session missing `project:` or `role:` is "ungrouped"; ticks and the nightly report list ungrouped sessions.
+A session missing `project:` or `role:` is "ungrouped"; the nightly close-out lists them (ids and titles in the private report, a count only in the public copy). Ticks do not list sessions: `list_sessions` is about 100KB.
 
 Archive gate (one rule, one owner). Archive only when ALL hold: (1) its PR is merged (state read in any NOVAHGREYWOLF repo; read-only),
 (2) its last message says `STATUS: DONE` (or "DONE"), (3) a handoff or final report exists, (4) it is idle, not a router, not the caller
