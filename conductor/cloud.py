@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from . import policy
 from .plan import (Task, assign_models, load_project, load_tasks, save_project, save_tasks, validate,
                    _load_router)
 from .report import write_report
@@ -54,8 +55,8 @@ def child_brief(task: Task, brief_dir: str | Path | None = None) -> str:
 
 def _generic_brief(task: Task) -> str:
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
-            "One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
-            "100k tokens, hard stop 150k. No polling, no wake-ups, never archive sessions, never force-push. "
+            f"One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
+            f"{policy.SESSION_SOFT // 1000}k tokens, hard stop {policy.SESSION_HARD // 1000}k. No polling, no wake-ups, never archive sessions, never force-push. "
             "Write a short handoff and stop when done or blocked.")
 
 

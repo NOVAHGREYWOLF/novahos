@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import policy
+
 STATUSES = ("todo", "doing", "pr", "review", "done", "blocked")
 EFFORTS = ("small", "low", "medium", "high", "xhigh")
 ENVELOPES = ("standard", "production", "critical", "door")
@@ -24,8 +26,8 @@ class PlanError(ValueError):
 
 @dataclass
 class Budget:
-    soft: int = 100_000
-    hard: int = 150_000
+    soft: int = policy.PROJECT_SOFT
+    hard: int = policy.PROJECT_HARD
 
 
 @dataclass
@@ -35,7 +37,8 @@ class Project:
     goal: str
     auto_archive: bool = False
     budget: Budget = field(default_factory=Budget)  # project TOTAL across all tasks
-    per_session: Budget = field(default_factory=Budget)  # one session: handoff at soft, stop at hard
+    per_session: Budget = field(default_factory=lambda: Budget(policy.SESSION_SOFT, policy.SESSION_HARD))
+    reuse_below: int = policy.REUSE_BELOW  # per_session.reuse_below: reuse an idle session only under this
 
 
 @dataclass
@@ -65,18 +68,23 @@ def project_from_dict(d: dict[str, Any]) -> Project:
     if not isinstance(d.get("auto_archive", False), bool):
         errs.append("project: 'auto_archive' must be true or false")
     limits = {}
+    defaults = {"budget": (policy.PROJECT_SOFT, policy.PROJECT_HARD),
+                "per_session": (policy.SESSION_SOFT, policy.SESSION_HARD)}
     for key in ("budget", "per_session"):
         b = d.get(key) or {}
-        soft, hard = b.get("soft", Budget.soft), b.get("hard", Budget.hard)
+        soft, hard = b.get("soft", defaults[key][0]), b.get("hard", defaults[key][1])
         if not all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (soft, hard)):
             errs.append(f"project: {key}.soft and {key}.hard must be positive integers")
         elif soft > hard:
             errs.append(f"project: {key}.soft ({soft}) must not exceed {key}.hard ({hard})")
         limits[key] = Budget(soft, hard)
+    reuse = (d.get("per_session") or {}).get("reuse_below", policy.REUSE_BELOW)
+    if not (isinstance(reuse, int) and not isinstance(reuse, bool) and reuse > 0):
+        errs.append("project: per_session.reuse_below must be a positive integer")
     if errs:
         raise PlanError("\n".join(errs))
     return Project(d["name"], d["slug"], d["goal"], d.get("auto_archive", False), limits["budget"],
-                   limits["per_session"])
+                   limits["per_session"], reuse)
 
 
 def task_from_dict(d: dict[str, Any]) -> Task:
@@ -107,7 +115,9 @@ def load_tasks(path: str | Path) -> list[Task]:
 
 
 def save_project(project: Project, path: str | Path) -> None:
-    Path(path).write_text(json.dumps(asdict(project), indent=2) + "\n")
+    d = asdict(project)
+    d["per_session"]["reuse_below"] = d.pop("reuse_below")  # project.json nests it under per_session
+    Path(path).write_text(json.dumps(d, indent=2) + "\n")
 
 
 def save_tasks(tasks: list[Task], path: str | Path) -> None:

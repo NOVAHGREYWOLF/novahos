@@ -25,8 +25,8 @@ def test_ready_selection_respects_deps_and_slots():
     assert kinds(tick(State(P(), tasks, max_parallel=3))) == [("start_fresh", "b"), ("start_fresh", "d")]
 
 
-def test_reuse_below_60k_fresh_otherwise():
-    tasks = [T("a", session_id="s1", context_tokens=59_999), T("b", session_id="s2", context_tokens=60_000),
+def test_reuse_below_200k_fresh_otherwise():
+    tasks = [T("a", session_id="s1", context_tokens=199_999), T("b", session_id="s2", context_tokens=200_000),
              T("c", context_tokens=0)]
     p = P(soft=10**9, hard=10**9)
     acts = tick(State(p, tasks, max_parallel=5))
@@ -65,22 +65,21 @@ def test_pure_same_input_same_output():
 
 
 def test_total_budget_is_not_the_per_session_limit():
-    tasks = [T("a", status="doing", session_id="s1", context_tokens=80_000),
-             T("b", status="doing", session_id="s2", context_tokens=80_000)]
-    p = Project("P", "p", "g")  # defaults: total 100k/150k, per-session 100k/150k
-    p.budget = Budget(500_000, 800_000)
-    assert kinds(tick(State(p, tasks))) == []
-    assert [a.kind for a in tick(State(Project("P", "p", "g"), tasks))] == ["stop_hard"]  # total 160k > default total
+    tasks = [T("a", status="doing", session_id="s1", context_tokens=250_000),
+             T("b", status="doing", session_id="s2", context_tokens=250_000)]
+    assert kinds(tick(State(Project("P", "p", "g"), tasks))) == []  # defaults: total 5M/8M, per-session 300k/450k
+    p = Project("P", "p", "g", budget=Budget(400_000, 800_000))
+    assert [a.kind for a in tick(State(p, tasks))] == ["stop_soft"]  # 500k total > the project's own soft total
 
 
 def test_per_session_handoff_due_and_stop_session():
     p = Project("P", "p", "g", budget=Budget(10**9, 10**9))
-    tasks = [T("a", status="doing", session_id="s1", context_tokens=100_000),
-             T("b", status="pr", session_id="s2", context_tokens=100_001),
-             T("c", status="review", session_id="s3", context_tokens=150_001),
-             T("d", status="todo", session_id="s4", context_tokens=200_000),
-             T("e", status="done", context_tokens=200_000),
-             T("f", status="doing", context_tokens=200_000)]  # no session: untracked
+    tasks = [T("a", status="doing", session_id="s1", context_tokens=300_000),
+             T("b", status="pr", session_id="s2", context_tokens=300_001),
+             T("c", status="review", session_id="s3", context_tokens=450_001),
+             T("d", status="todo", session_id="s4", context_tokens=500_000),
+             T("e", status="done", context_tokens=500_000),
+             T("f", status="doing", context_tokens=500_000)]  # no session: untracked
     acts = [a for a in tick(State(p, tasks, max_parallel=0)) if a.kind in ("handoff_due", "stop_session")]
     assert kinds(acts) == [("handoff_due", "b"), ("stop_session", "c")]
 
@@ -88,8 +87,16 @@ def test_per_session_handoff_due_and_stop_session():
 def test_per_session_field_validated_and_optional():
     from conductor.plan import PlanError, project_from_dict
     base = {"name": "P", "slug": "p", "goal": "g"}
-    assert project_from_dict(base).per_session == Budget(100_000, 150_000)
+    assert project_from_dict(base).per_session == Budget(300_000, 450_000)
+    assert project_from_dict(base).budget == Budget(5_000_000, 8_000_000) and project_from_dict(base).reuse_below == 200_000
+    assert project_from_dict({**base, "per_session": {"reuse_below": 50_000}}).reuse_below == 50_000
     assert project_from_dict({**base, "per_session": {"soft": 5, "hard": 9}}).per_session == Budget(5, 9)
     import pytest
     with pytest.raises(PlanError):
         project_from_dict({**base, "per_session": {"soft": 9, "hard": 5}})
+
+
+def test_reuse_below_is_per_project_and_flows_from_policy():
+    tasks = [T("a", session_id="s1", context_tokens=100_000)]
+    p = Project("P", "p", "g", reuse_below=50_000)
+    assert kinds(tick(State(p, tasks))) == [("start_fresh", "a")]

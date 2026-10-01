@@ -21,7 +21,7 @@ def test_valid_plan_loads(tmp_path):
         {"id": "b", "title": "B", "depends": ["a"], "effort": "high", "envelope": "critical"},
     ]))
     p = plan.load_project(tmp_path / "project.json")
-    assert (p.auto_archive, p.budget.soft, p.budget.hard) == (False, 100_000, 150_000)
+    assert (p.auto_archive, p.budget.soft, p.budget.hard) == (False, 5_000_000, 8_000_000)
     tasks = plan.load_tasks(tmp_path / "tasks.json")
     assert [t.id for t in tasks] == ["a", "b"] and tasks[0].status == "todo"
 

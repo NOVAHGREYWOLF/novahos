@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 
 from .plan import Project, Task, ready_tasks
 
-REUSE_BELOW_TOKENS = 60_000  # same threshold as the handoff / route-and-spawn skills
 
 
 @dataclass
@@ -85,12 +84,13 @@ def tick(state: State) -> list[Action]:
         else:
             actions.append(Action("archive_candidate", t.id, t.session_id, "auto_archive is off: list only"))
 
+    reuse_below = p.reuse_below
     if level is None:
         for t in ready_tasks(tasks, state.max_parallel):
-            if t.session_id and t.context_tokens < REUSE_BELOW_TOKENS:
+            if t.session_id and t.context_tokens < reuse_below:
                 actions.append(Action("start_reuse", t.id, t.session_id,
-                                      f"{t.context_tokens} < {REUSE_BELOW_TOKENS} context tokens"))
+                                      f"{t.context_tokens} < {reuse_below} context tokens"))
             else:
-                why = "no session yet" if not t.session_id else f"{t.context_tokens} >= {REUSE_BELOW_TOKENS} context tokens"
+                why = "no session yet" if not t.session_id else f"{t.context_tokens} >= {reuse_below} context tokens"
                 actions.append(Action("start_fresh", t.id, None, why))
     return actions

@@ -3,8 +3,8 @@
 
 Why: cost grows with context size (every turn re-reads the whole history). On the board's
 own numbers, sessions finishing under 100k averaged $0.68, 150-200k $3.00, 200-300k $4.65.
-The 150k rule existed but was only a sentence in a brief; nothing measured it. This hook
-measures it.
+The limits existed but were only a sentence in a brief; nothing measured them. This hook
+measures them. Limits are sized by the owner's 2026-10-01 policy (weekly usage is low, so bigger sessions).
 
 How: runs on PostToolUse and UserPromptSubmit. Reads the tail of the session transcript, takes
 the LAST main-thread assistant message's usage (input + cache_read + cache_creation = the size
@@ -13,8 +13,8 @@ into the model's context. It never blocks a tool and never raises: a broken guar
 break a session.
 
 Env (all optional):
-    SESSION_SOFT_TOKENS   default 100000  -> "finish this step, write the handoff, stop"
-    SESSION_HARD_TOKENS   default 150000  -> "stop now"
+    SESSION_SOFT_TOKENS   default 300000  -> "finish this step, write the handoff, stop"
+    SESSION_HARD_TOKENS   default 450000  -> "stop now"
     SESSION_GUARD_OFF=1                   -> disable
 """
 from __future__ import annotations
@@ -25,8 +25,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-SOFT_DEFAULT = 100_000
-HARD_DEFAULT = 150_000
+# Standalone (copied into other repos), so no import; tests/test_session_budget.py keeps these equal to conductor/policy.py.
+SOFT_DEFAULT = 300_000
+HARD_DEFAULT = 450_000
 TAIL_BYTES = 768 * 1024
 REWARN_EVERY = 10_000  # re-nag after this many more tokens, so it is heard but not spammy
 

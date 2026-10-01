@@ -128,7 +128,7 @@ def test_plan_brief_dir_flag_reaches_prompt(tmp_path, capsys):
 
 
 def test_handoff_due_in_plan_output(tmp_path):
-    c = setup(tmp_path, [{"id": "a", "title": "t", "status": "doing", "session_id": "S", "context_tokens": 120000}])
+    c = setup(tmp_path, [{"id": "a", "title": "t", "status": "doing", "session_id": "S", "context_tokens": 320000}])
     out = plan_tick(c, "u")
     assert [h["session_id"] for h in out["handoffs"]] == ["S"] and "handoff" in out["handoffs"][0]["send_message"]
 
