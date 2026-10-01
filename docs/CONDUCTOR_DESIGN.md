@@ -97,3 +97,22 @@ Gotchas:
 - `tick` does not mutate tasks or set `doing`; the runner must record starts itself or the next tick will re-select them.
 - `ready_tasks` caps by max_parallel minus in-flight, so a tick during a stop emits no starts at all.
 - Keep `conductor/` out of setuptools `include`; tests insert the repo root on `sys.path`.
+
+## Handoff (build step 4)
+Done: `conductor/runner.py` and `tests/test_conductor_runner.py` (3 tests; 31 pass with plan/report/tick). Stdlib only.
+Draft PR stacked on #28 (base `claude/conductor-tick`); retarget as #25/#26/#27/#28 merge.
+API: `run_tick(repo, executor=claude_executor, max_parallel=3, conductor_dir=None) -> list[Action]` reads `.conductor/{project,tasks}.json`,
+runs `assign_models` + `tick`, and for each start: `ensure_worktree` (`.conductor/worktrees/<id>`, branch `conductor/<id>`), records `doing`
+in tasks.json, calls the executor, then writes `session_id`, `cost_usd` (accumulated), `context_tokens` (latest context size) and status
+(`review` on success, `blocked` on failure); finally regenerates `report.md` (stop reasons go to Open items).
+Executor = `Callable[[ExecRequest], ExecResult]`; default builds `claude -p PROMPT --model X --max-turns N --output-format json [--resume ID]`
+and parses `total_cost_usd`, `session_id`, `usage` (input + cache create/read + output tokens). Tests inject a fake; the smoke test uses a temp git repo.
+Next: step 5, cloud runner as a skill (`/tick`, `/project-start`) calling create/get/archive session tools, plus one scheduled routine. Reuse `tick()` unchanged;
+only the executor/state store differs (sessions instead of worktrees; read session status via get_session).
+Gotchas:
+- The real `claude` CLI path is untested here (no network/claude in unit tests); verify the JSON shape and the `--resume` + `-p` combination on first real use.
+- Starts run sequentially, not in parallel; `max_parallel` only caps how many a tick starts.
+- Local runs never archive: `archive`/`archive_candidate` actions are ignored (listed in report only).
+- `context_tokens` is the last run's usage total, an approximation of context size, not a sum.
+- Worktrees are created from `HEAD` of the repo; the runner never pushes.
+- tmp-path tests need `mkdir(parents=True)`; `pip install pytest` may be needed in a fresh session.
