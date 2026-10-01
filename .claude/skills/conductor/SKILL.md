@@ -22,7 +22,8 @@ No polling, no wake-ups, no PR subscriptions: one tick = one pass, then stop.
    - CI red: report the PR and the failing check names. Do not start a babysit session yourself: the router decides (one small babysit session per PR, brief `TEMPLATE-babysit-brief` on the board).
 4. `python3 -m conductor.cloud plan --repo-url <repo url> --revision <branch>` -> JSON `{spawns, reuses, archives, archive_candidates, stops}`. Starts are already claimed (`doing`), so a second tick will not repeat them.
 5. For each `spawns[i]`: call `create_session` with its `create_session` object as-is (model, source_url, source_revision, tags, title, prompt). Make sure the call carries:
-   - tags `project:<slug>`, `role:task`, `task:<id>`, `model:<m>` (taxonomy in `docs/CONDUCTOR_DESIGN.md`), plus any tags the object already has;
+   - tags `lane:<LANE>`, `role:task`, `task:<id>`, `model:<m>`, and `project:<slug>` for a plan project (taxonomy in `docs/CONDUCTOR_DESIGN.md`), plus any tags the object already has;
+   - title `<LANE> · <task id> <task title>` (the Claude app groups sessions by lane; the lane comes from the task, else the project default; if neither is set, ask in your reply, do not guess);
    - `extra_allowed_tools: ["mcp__claude-code-remote__send_message"]`.
    Then `python3 -m conductor.cloud start <task_id> <new session id>`.
 6. For each `reuses[i]`: `send_message` to its `session_id` with its `send_message` text; no create.

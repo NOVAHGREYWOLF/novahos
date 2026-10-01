@@ -151,25 +151,33 @@ Gotchas:
 so `auto_archive` now has a path to fire. Gotchas: imported sessions are matched by session id only; auto-start still needs the routine in `docs/CONDUCTOR_ROUTINE.md` to be created.
 
 ## Session taxonomy
-Every session created by the conductor, router or a routine carries these tags (existing tags `conductor`, `router`, `router:current`,
-`incarnation:N`, `config:*` stay). Tags are only ever added by sweeps, never removed.
+The owner works in LANES, shown as groups in the Claude app sidebar: ROUTER, SENSORS, DOORS, INTELLIGENCE, ARMS, NODE, SURFACE, LAB, MONEY,
+VAULT, SUITE, ROUNDTRIP, COMMS, FIELD, PRIVACY, PRODUCT, WATCH, MARKET, BRAIN, plus WEBSITES (website development). The app's groups are not
+exposed by the session API (rows carry only tags), so each session mirrors its lane as a tag, and its title is `<LANE> · <topic>`.
+Tags are only ever added by sweeps, except when the owner asks for a retag. Existing tags (`conductor`, `router`, `router:current`,
+`incarnation:N`, `remote-control-sdk`, `config:*`) stay.
 
 | tag | values | meaning |
 | --- | --- | --- |
-| `project:<slug>` | `leadfuel-reports`, `leadfuel-board`, `conductor-kit`, `session-budget`, ... | which project the session belongs to; lower-case `project.json` slug |
-| `role:<r>` | `router`, `conductor`, `task`, `watchdog`, `report`, `scratch` | what kind of session it is |
-| `task:<id>` | task id from tasks.json, or `s-<last 8 of session id>` for adopted sessions | only for role `task`/`scratch` that belong to a task |
+| `lane:<NAME>` | one of the lanes above | REQUIRED. The group the session belongs to. |
+| `role:<r>` | `router`, `conductor`, `task`, `watchdog`, `report`, `scratch` | REQUIRED. What kind of session it is. |
+| `project:<slug>` | `leadfuel-reports` | only for the LeadFuel completion plan (the conductor's `project.json` slug). Not a grouping. |
+| `task:<id>` | task id from tasks.json, or `s-<last 8 of session id>` for adopted sessions | task and scratch sessions that belong to a task |
 | `model:<m>` | `opus`, `sonnet`, `haiku` | model routed (short name) |
+
+LeadFuel completion tasks map to lanes: Reports tasks (P*, P5-F*) INTELLIGENCE; gateway tasks (G*, MERGE-3, MERGE-4) MONEY; conductor, kit and router
+tasks (CND-*, conductor-*, MERGE-2) ROUTER. Cost-control work (session-budget kit, API cost) is MONEY.
 
 Roles:
 - `router`: the one session the owner talks to (also keeps `router`, `router:current`, `incarnation:N`).
 - `conductor`: a long-lived or successor coordinator, or a conductor build session.
 - `task`: one task, one session, one PR.
-- `watchdog`: a routine-fired tick session (hourly tick, nightly close-out).
+- `watchdog`: a routine-fired tick session (hourly tick, nightly close-out); lane ROUTER.
 - `report`: a session whose job is a report or briefing block.
 - `scratch`: smoke tests, throwaway pings, experiments. Never part of a plan.
 
-A session missing `project:` or `role:` is "ungrouped"; the nightly close-out lists them (ids and titles in the private report, a count only in the public copy). Ticks do not list sessions: `list_sessions` is about 100KB.
+A session missing `lane:` or `role:` is "ungrouped"; the nightly close-out lists them (ids and titles in the private report, a count only in the
+public copy). Ticks do not list sessions: `list_sessions` is about 100KB.
 
 Archive gate (one rule, one owner). Archive only when ALL hold: (1) its PR is merged (state read in any NOVAHGREYWOLF repo; read-only),
 (2) its last message says `STATUS: DONE` (or "DONE"), (3) a handoff or final report exists, (4) it is idle, not a router, not the caller
