@@ -116,3 +116,17 @@ Gotchas:
 - `context_tokens` is the last run's usage total, an approximation of context size, not a sum.
 - Worktrees are created from `HEAD` of the repo; the runner never pushes.
 - tmp-path tests need `mkdir(parents=True)`; `pip install pytest` may be needed in a fresh session.
+
+## Handoff (build step 5)
+Done: `conductor/cloud.py` (+ `tests/test_conductor_cloud.py`, 4 tests; 35 pass with plan/report/tick/runner), skill `.claude/skills/conductor/SKILL.md`,
+entry points `.claude/commands/tick.md` and `project-start.md`, and the routine definition `docs/CONDUCTOR_ROUTINE.md` (documented only, no trigger created).
+Draft PR stacked on #29 (base `claude/conductor-runner`); retarget as #25/#26/#27/#28/#29 merge.
+Design: `python3 -m conductor.cloud plan|start|status|report` does the deterministic work (reuses `tick()` unchanged); the skill makes the
+`create_session` / `send_message` / `get_session` / `archive_session` calls. `plan` claims starts as `doing` so repeated ticks never re-select them.
+Next: step 6, board sync view only (render tasks.json to a board view, no write-back) + docs publish for the final report (`report.md`).
+Gotchas:
+- The `get_session` shape is assumed, not verified here: `status_bucket` (working/review_ready/completed/blocked/failed) and `context_usage.used_tokens`; cost is read from `cost_usd`/`usage.cost_usd`/`total_cost_usd` if present, otherwise left unchanged. Verify on first real run.
+- `completed` maps to `review`, never `done`: a human (or PR merge) marks `done`; only then does `auto_archive` act.
+- `start_reuse` sends the brief via `send_message`; it does not check the session is idle.
+- `conductor/` stays out of the setuptools include list; tests insert the repo root on `sys.path`. `pip install pytest` may be needed.
+
