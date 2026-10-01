@@ -55,6 +55,9 @@ same files, so they never disagree. The board (ArtifactData) is a *view* synced 
 - Hook behaviour in `create_session` sessions: unverified.
 - The install of the kit into the other repos is blocked on `add_repo` permission (session_013enoai3KJ3s6X4ZKUcHpW3).
 - Weekly limit reset: 2026-10-03 21:00 UTC; ticks must stay on Sonnet/Haiku.
+- Pre-approval via `extra_allowed_tools` is unproven (spawned sessions may stop on a permission prompt), so reporting is pull-first: the tick reads each session's latest `STATUS:` line with `list_events`.
+- Routines need connectors set in the claude.ai routines UI (`create_trigger`'s `connectors` parameter is not available for this org); see `CONDUCTOR_ROUTINE.md`.
+- The kit is not on main until the stack merges (PRs are stacked on `claude/conductor-done`).
 
 ## Handoff (from the design session)
 Done: session-budget kit merged (#24); board has RULE-session-budget, TEMPLATE-child-brief, TEMPLATE-babysit-brief.
@@ -145,3 +148,73 @@ Gotchas:
 ## Follow-up: mark-done, import, auto-archive config
 `conductor.cloud` gained `mark-done TASK_ID... [--pr N]`, `import SESSIONS_JSON`, `config --auto-archive on|off` (+2 tests, 40 pass). The skill's /tick step 0 marks merged-PR tasks done,
 so `auto_archive` now has a path to fire. Gotchas: imported sessions are matched by session id only; auto-start still needs the routine in `docs/CONDUCTOR_ROUTINE.md` to be created.
+
+## Session taxonomy
+Every session created by the conductor, router or a routine carries these tags (existing tags `conductor`, `router`, `router:current`,
+`incarnation:N`, `config:*` stay). Tags are only ever added by sweeps, never removed.
+
+| tag | values | meaning |
+| --- | --- | --- |
+| `project:<slug>` | `leadfuel-reports`, `leadfuel-board`, `conductor-kit`, `session-budget`, ... | which project the session belongs to; lower-case `project.json` slug |
+| `role:<r>` | `router`, `conductor`, `task`, `watchdog`, `report`, `scratch` | what kind of session it is |
+| `task:<id>` | task id from tasks.json, or `s-<last 8 of session id>` for adopted sessions | only for role `task`/`scratch` that belong to a task |
+| `model:<m>` | `opus`, `sonnet`, `haiku` | model routed (short name) |
+
+Roles:
+- `router`: the one session the owner talks to (also keeps `router`, `router:current`, `incarnation:N`).
+- `conductor`: a long-lived or successor coordinator, or a conductor build session.
+- `task`: one task, one session, one PR.
+- `watchdog`: a routine-fired tick session (hourly tick, nightly close-out).
+- `report`: a session whose job is a report or briefing block.
+- `scratch`: smoke tests, throwaway pings, experiments. Never part of a plan.
+
+A session missing `project:` or `role:` is "ungrouped"; ticks and the nightly report list ungrouped sessions.
+
+Archive gate (one rule, one owner). Archive only when ALL hold: (1) its PR is merged (state read in any NOVAHGREYWOLF repo; read-only),
+(2) its last message says `STATUS: DONE` (or "DONE"), (3) a handoff or final report exists, (4) it is idle, not a router, not the caller
+or its parent. The hourly tick archives plan tasks, through `python3 -m conductor.cloud mark-done` (`auto_archive` is on for project
+`leadfuel-reports`). The nightly close-out applies the same gate and skips already-archived sessions. No other archiver. `role:scratch`
+sessions and routers are archived only with the owner's yes.
+
+Reporting is pull-first. Children still send `STATUS:` via `mcp__claude-code-remote__send_message`, but ticks do not depend on it.
+The tick reads each task session's latest `STATUS: DONE|BLOCKED|NEEDS-NOVAH|CONTINUING` line from `list_events` (kinds assistant,result,
+limit 3). A session whose `post_turn_summary.status_detail` starts with "Waiting on permission" is `blocked`. Every child `create_session`
+passes `extra_allowed_tools: ["mcp__claude-code-remote__send_message"]` anyway (entries the spawner lacks are dropped).
+
+## Daily report contract
+Read by the command briefing in novahub (NOVAHGREYWOLF/novahub#697). Routine: "Conductor nightly", 20:07 PT. It stores TWO documents in
+the private Briefcase through the `novahub_brain` connector's `store_document`, plus a sanitized public copy in git.
+
+(a) Digest. name `conductor_report YYYY-MM-DD` (date in Pacific Time), kind `conductor_report`, source_app `conductor`,
+source_entity_id `YYYY-MM-DD`, source_entity_label `Conductor nightly report`. content = plain text, at most 1500 chars:
+
+```
+conductor_report YYYY-MM-DD (PT)
+STATUS: DONE|BLOCKED|NEEDS-NOVAH|CONTINUING
+DONE TODAY: <n>
+- <task id> | <title, 60 chars max> | <PR url>
+DID NOT WORK: <n>
+- <task id or session id> | <one line>
+SPEND: $<total> | <tokens> tokens | soft <s> hard <h> | ok|soft|hard
+TASKS: completed <a> / in progress <b> / blocked <c> / todo <d> | GOALS <x>/<y>
+ARCHIVED: <ids or none>
+NEXT:
+- <task id>: <one line, who decides>
+NEEDS NOVAH:
+- <item> (or "nothing")
+REPORT: <public report PR url, or "no PR">
+FULL: conductor_report_full YYYY-MM-DD
+```
+
+(b) Full report. name `conductor_report_full YYYY-MM-DD`, kind `conductor_report_full`, source_app `conductor`, same source_entity_id.
+content = the private markdown report with sections: Intent; Done today; What worked; What did not; No completion note;
+Budget vs spend; Tasks and goals; Archived tonight; Next; Open questions for Novah.
+
+A new document is stored each day; a rerun the same day passes `supersedes_id` of the earlier row. Freshness for readers is the
+`created_at` of the newest non-superseded row. Readers query `list_documents(app="conductor", kind="conductor_report")` and never scan the
+whole Briefcase (500+ documents, mostly lucid facts).
+
+Public/private split. The digest and the full report are private (Briefcase). The git copy is public: `docs/reports/YYYY-MM-DD.md` in
+novahos, on branch `claude/nightly-report-YYYY-MM-DD`, draft PR to main. It has the same sections as the full report with: no dollar
+amounts, no token counts, "Budget vs spend" = one line `budget status: ok|soft|hard`, "Open questions for Novah" = "see the private report".
+Public repos get ids, titles, status, PR numbers and counts only: no secrets, no emails, no spend, no private details.
