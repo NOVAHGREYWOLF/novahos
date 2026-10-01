@@ -139,3 +139,20 @@ same-day report is available); (4) whether #683 merged; (5) final status of #692
 - **Routine step 2 stays limited to `conductor`-tagged sessions.** The two Reports sessions are Novah's manual decision.
 - **Briefing shows both**: the full report is stored/available, and the CONDUCTOR block shows a digest plus link.
 - Still requires Novah to add the brain connector to the routine; not changed here.
+
+### Session completion contract (Novah, 2026-10-01)
+Every conductor/Reports session must say when it is done, or what comes next. No silent idle.
+The **last message of every turn that ends a task** starts with one status line, then the next steps:
+
+```
+STATUS: DONE | BLOCKED | NEEDS-NOVAH | CONTINUING
+PR: <url or none> · CI: <green/red/pending> · Context: <tokens>
+DONE: <1-3 bullets>
+NEXT: <the single next step, who does it (Novah / which session / routine)>
+QUESTIONS: <only what Novah must decide, or none>
+```
+Rules: DONE only when the PR is merged or the task needs nothing more; a draft PR waiting on review is `NEEDS-NOVAH` with
+the exact ask. The same block is written to the task's handoff note (`.conductor/handoffs/<task>.md` or the board task) so a
+fresh session and the nightly report can read it without the transcript. Add the block to the child and babysit brief
+templates and to the `handoff` skill (not changed here). The nightly report should list any session whose last message has no
+STATUS line as "no completion note" (proposed addition to the routine; Novah's call, routine not changed here).
