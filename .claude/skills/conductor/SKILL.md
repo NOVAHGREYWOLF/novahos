@@ -26,3 +26,8 @@ No polling, no wake-ups, no PR subscriptions: one tick = one pass, then stop.
 - Model choice comes from the router (`route-and-spawn`); never override it here. Briefs follow `TEMPLATE-child-brief` via `child_brief()`.
 - A `failed`/`blocked` session marks the task `blocked`; retry only by the escalation rule in `route-and-spawn`, in a new tick.
 - Never force-push, never print secrets, never spawn from inside a child task session. Check your own `used_tokens` and hand off per the `handoff` skill at 90k.
+
+## /board and /publish-report (view only)
+- `python3 -m conductor.cloud board` writes `.conductor/board.md` from tasks.json. It never writes back to tasks or any board.
+- `python3 -m conductor.cloud publish-doc` regenerates report.md and prints the arguments for the docs `batch` tool
+  (`container.create` with the report as markdown). Call `batch` with that JSON as-is, then give the user the doc link. Publish only when asked or at project end.

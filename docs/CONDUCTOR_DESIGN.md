@@ -130,3 +130,14 @@ Gotchas:
 - `start_reuse` sends the brief via `send_message`; it does not check the session is idle.
 - `conductor/` stays out of the setuptools include list; tests insert the repo root on `sys.path`. `pip install pytest` may be needed.
 
+
+## Handoff (build step 6) - BUILD COMPLETE
+Done: `conductor/board.py` (`render_board(project, tasks)`, `write_board`, `doc_payload(report_md)`), CLI `python3 -m conductor.cloud board|publish-doc`,
+`tests/test_conductor_board.py` (3 tests; 38 pass with plan/report/tick/runner/cloud), and a skill section. All six build steps (#25-#30 plus this PR) are done; the conductor build is complete.
+Board = read-only Markdown kanban (one section per status, file order), written to `.conductor/board.md`; tasks.json is never modified.
+Docs publish = `publish-doc` prints the docs `batch` create payload for report.md; the skill makes the actual call (no network in code or tests).
+Gotchas:
+- The docs `batch` payload shape follows the docs connector instructions (`container.kind=project`, `create.doc.markdown`); verify on first real publish.
+- No external board (GitHub Projects etc.) is synced; there is deliberately no write-back.
+- PR stack: #25 <- #26 <- #27 <- #28 <- #29 <- #30 <- this PR; retarget each to main as the one below merges.
+- `conductor/` stays out of the setuptools include list; `pip install pytest` may be needed.

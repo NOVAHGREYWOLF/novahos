@@ -9,6 +9,8 @@ CLI (JSON in/out, see the skill):
   python3 -m conductor.cloud start TASK_ID SESSION_ID
   python3 -m conductor.cloud status TASK_ID SESSION_JSON_FILE
   python3 -m conductor.cloud report
+  python3 -m conductor.cloud board        # writes .conductor/board.md (view only)
+  python3 -m conductor.cloud publish-doc  # prints the docs `batch` payload for report.md
 """
 from __future__ import annotations
 
@@ -126,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("task_id")
     st.add_argument("session_json")
     sub.add_parser("report")
+    sub.add_parser("board")
+    sub.add_parser("publish-doc")
     a = ap.parse_args(argv)
     cdir = Path(a.dir)
     if a.cmd == "plan":
@@ -135,6 +139,12 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "status":
         t = record_status(cdir, a.task_id, json.loads(Path(a.session_json).read_text()))
         out = {"task": t.id, "status": t.status, "context_tokens": t.context_tokens, "cost_usd": t.cost_usd}
+    elif a.cmd == "board":
+        from .board import write_board
+        out = {"board": str(write_board(cdir / "board.md", load_project(cdir / "project.json"), load_tasks(cdir / "tasks.json")))}
+    elif a.cmd == "publish-doc":
+        from .board import doc_payload
+        out = doc_payload(render_report(cdir).read_text())
     else:
         out = {"report": str(render_report(cdir))}
     json.dump(out, sys.stdout, indent=2)
