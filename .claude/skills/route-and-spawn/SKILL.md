@@ -17,7 +17,7 @@ python3 .claude/skills/route-and-spawn/route.py '{"title":"<task title>","effort
 Returns `{"model","model_id","reason"}`. Rules: Opus for `critical`/`door` envelopes, high/xhigh effort, or security/auth/migration/architecture/rewrite in the title; Haiku for small/low mechanical work (sweeps, typos, docs, display text); Sonnet otherwise. Override by setting `model_pin` on the task, and say why on the task. If a Sonnet/Haiku session fails the same step twice, escalate one tier for the retry, not before.
 
 ## 3. Spawn
-`create_session` with `model` = the returned `model_id`, the repo as `source_url`, tags `["<task id>", "model:<name>"]`, and the brief from board doc `TEMPLATE-child-brief` (fill task id, one-line goal, done-criteria). One task, one session, one PR. Prefer a task that fits in ~80k tokens; split anything larger on the board first.
+`create_session` with `model` = the returned `model_id`, the repo as `source_url`, tags `["<task id>", "model:<name>"]`, and the brief from board doc `TEMPLATE-child-brief` (fill task id, one-line goal, done-criteria). Every brief must tell the child to end with the STATUS completion block from the `handoff` skill (DONE / BLOCKED / NEEDS-NOVAH / CONTINUING, PR, CI, NEXT, QUESTIONS); add it to `TEMPLATE-child-brief` and `TEMPLATE-babysit-brief` on the board if missing. One task, one session, one PR. Prefer a task that fits in ~80k tokens; split anything larger on the board first.
 
 ## 4. Record
 On the board task write `session_id`, `model`, `model_id`, `started_at`; on finish write `context_tokens` and `cost_usd` from `get_session`. Those fields are what lets us see where credits go.

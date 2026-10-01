@@ -153,6 +153,5 @@ QUESTIONS: <only what Novah must decide, or none>
 ```
 Rules: DONE only when the PR is merged or the task needs nothing more; a draft PR waiting on review is `NEEDS-NOVAH` with
 the exact ask. The same block is written to the task's handoff note (`.conductor/handoffs/<task>.md` or the board task) so a
-fresh session and the nightly report can read it without the transcript. Add the block to the child and babysit brief
-templates and to the `handoff` skill (not changed here). The nightly report should list any session whose last message has no
+fresh session and the nightly report can read it without the transcript. The block is now in the `handoff` and `route-and-spawn` skills. The board docs `TEMPLATE-child-brief`/`TEMPLATE-babysit-brief` live on the board, outside this repo: they still need the same block added (not changed here). The nightly report should list any session whose last message has no
 STATUS line as "no completion note" (proposed addition to the routine; Novah's call, routine not changed here).
