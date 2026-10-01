@@ -134,7 +134,8 @@ same-day report is available); (4) whether #683 merged; (5) final status of #692
 5. Resolve the Reports coordinator's pending asks (6 questions, two session archives, leadfuel-core PR #2) so the program has one
    open owner.
 
-### Open questions for Novah
-- Option A (brain document, needs a connector added to the routine) or C (GitHub file)?
-- May the routine's step 2 stay limited to `conductor`-tagged sessions, leaving the two Reports sessions to you?
-- Should the briefing show the full report or only a digest + link?
+### Decisions (Novah, 2026-10-01)
+- **Wiring: option A (brain document), option C (GitHub file read) as backup** if A cannot be done (e.g. the routine cannot get the brain connector, or `compose` cannot read brain documents).
+- **Routine step 2 stays limited to `conductor`-tagged sessions.** The two Reports sessions are Novah's manual decision.
+- **Briefing shows both**: the full report is stored/available, and the CONDUCTOR block shows a digest plus link.
+- Still requires Novah to add the brain connector to the routine; not changed here.
