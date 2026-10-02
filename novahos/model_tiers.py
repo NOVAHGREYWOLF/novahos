@@ -21,8 +21,8 @@ Stdlib-only on purpose, like ``gateway_url``: novahos is a library installed int
 and a plain ``novahos`` install (no extras) must still be able to answer "which model?".
 
 This module does not route, gate or meter anything — that stays in ``novahos.llm``. It only
-names models. ``CoreSettings.reasoning_model`` / ``cheap_model`` are left as they are for now;
-pointing them at these tiers changes what the kernel's own calls run on and is its own change.
+names models. ``CoreSettings.reasoning_model`` / ``cheap_model`` default to the ``reason`` /
+``classify`` tiers here (env ``REASONING_MODEL`` / ``CHEAP_MODEL`` still override).
 """
 from __future__ import annotations
 
