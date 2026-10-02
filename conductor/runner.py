@@ -88,7 +88,8 @@ def ensure_worktree(repo: Path, task: Task, base: str = "HEAD") -> Path:
 def task_prompt(task: Task) -> str:
     return (f"Task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
             "Work on this branch only, commit your changes, do not push or force-push, "
-            "and write a short handoff if you run out of budget.")
+            "and write a short handoff if you run out of budget."
+            + (f"\n\n{task.brief}" if task.brief else ""))
 
 
 def run_tick(repo: str | Path, executor: Executor = claude_executor, max_parallel: int = 3,

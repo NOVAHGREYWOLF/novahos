@@ -57,6 +57,7 @@ class Task:
     cost_usd: float = 0.0
     context_tokens: int = 0
     lane: str | None = None  # overrides the project's default lane
+    brief: str | None = None  # full task text for the session; prompts append it when set
 
 
 def lane_error(lane: Any, where: str) -> str | None:
@@ -123,8 +124,9 @@ def load_tasks(path: str | Path) -> list[Task]:
 def _plain(obj: Project | Task) -> dict[str, Any]:
     """asdict, minus an unset lane so files that never used lanes stay byte-identical."""
     d = asdict(obj)
-    if d.get("lane") is None:
-        d.pop("lane", None)
+    for optional in ("lane", "brief"):
+        if d.get(optional) is None:
+            d.pop(optional, None)
     return d
 
 
