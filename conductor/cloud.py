@@ -46,7 +46,8 @@ def child_brief(task: Task) -> str:
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
             "One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
             f"300k tokens, hard stop 450k.{haiku} No polling, no wake-ups, never archive sessions, never force-push. "
-            "Write a short handoff and stop when done or blocked.")
+            "Write a short handoff and stop when done or blocked."
+            + (f"\n\n{task.brief}" if task.brief else ""))
 
 
 def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: int = 3, claim: bool = True) -> dict:
