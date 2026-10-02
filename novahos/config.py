@@ -6,6 +6,8 @@ many apps. Requires pydantic-settings (novahos[substrate]).
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from novahos.model_tiers import model_for
+
 
 class CoreSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -14,8 +16,8 @@ class CoreSettings(BaseSettings):
     db_schema: str = "novah"
     redis_url: str = "redis://localhost:6379"
 
-    reasoning_model: str = "claude-opus-4-8"
-    cheap_model: str = "claude-haiku-4-5-20251001"
+    reasoning_model: str = model_for("reason")
+    cheap_model: str = model_for("classify")
 
     owner_emails: str = ""
     account_header: str = "X-Leadfuel-Account"

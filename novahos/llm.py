@@ -331,19 +331,37 @@ def _shared_engine():
         return None
 
 
+def _cost_or_none(resp, model: str, tokens_in: int, tokens_out: int) -> float | None:
+    """Cost of one call in USD, or ``None`` when it cannot be established.
+
+    ``None`` means UNKNOWN, never zero: ``cost_usd = 0.0`` reads as "free" to every spend
+    check, so a model litellm cannot price (not in its cost map, or a price of 0 for a call
+    that consumed tokens) must not be recorded as 0. The row is still written (tokens and
+    model are real) with a NULL cost, and a WARNING names the model."""
+    try:
+        cost = litellm.completion_cost(completion_response=resp)
+        cost = None if cost is None else float(cost)
+    except Exception:  # noqa: BLE001 — falls through to unknown below
+        cost = None
+    if cost is None or (cost <= 0.0 and (tokens_in or tokens_out)):
+        log.warning("[novahos.llm] cannot price model=%s (%s in / %s out tokens) — recording "
+                    "cost_usd as UNKNOWN (NULL), not 0; litellm likely predates this model",
+                    model, tokens_in, tokens_out)
+        return None
+    return cost
+
+
 async def _emit_shared(resp, model: str, tokens_in: int, tokens_out: int) -> None:
     """Write ONE ai_usage row for a kernel call the host did not capture.
 
     Only reached when no capture bracket is active, so it can never double-count a
-    host-owned row. Never raises: accounting must not break the agent that called us."""
+    host-owned row. ``cost_usd`` is NULL when the call cannot be priced (see
+    :func:`_cost_or_none`). Never raises: accounting must not break the agent that called us."""
     eng = _shared_engine()
     if eng is None:
         return
     try:
-        try:
-            cost = float(litellm.completion_cost(completion_response=resp) or 0.0)
-        except Exception:  # noqa: BLE001 — an unpriced model is still worth recording
-            cost = 0.0
+        cost = _cost_or_none(resp, model, tokens_in, tokens_out)
         from sqlalchemy import text as _t
         service = (os.environ.get("NOVAHOS_SERVICE") or "novahos").strip()[:32]
         async with eng.begin() as conn:
