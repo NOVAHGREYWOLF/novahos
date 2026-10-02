@@ -86,3 +86,27 @@ def test_cli(tmp_path, capsys):
     pk, dk = _fixture(tmp_path)
     assert picks.main(["--picks", str(pk), "--desks", str(dk), "--out", str(tmp_path / "o")]) == 0
     assert "queued 2 task(s)" in capsys.readouterr().out
+
+
+def test_real_export_shapes(tmp_path):
+    """Shapes seen in the real ArtifactData export: lower-case desk doc id, no `desk` field, upper-case desk in
+    the pick, @ in file names, answer/note decisions, needs-owner status, free-text owner."""
+    pk, dk = tmp_path / "picks", tmp_path / "desks"
+    tasks = {
+        "P7": {"title": "Reports 7", "status": "open", "owner": "session", "basis": "x", "key": "P7"},
+        "P8": {"title": "Reports 8", "status": "open", "owner": "session", "basis": "x",
+               "decision": {"answer": "Yes", "note": "mind the mailbox", "q": 23, "source": "Router desk page"}},
+        "N1": {"title": "Needs him", "status": "needs-owner", "owner": "session"},
+        "N2": {"title": "His own", "status": "open", "owner": "Novah"},
+        "N3": {"title": "Mixed", "status": "open", "owner": "novah-then-session"},
+        "N4": {"title": "Odd status", "status": "weird", "owner": "session"},
+    }
+    _w(dk, "watch", {"name": "WATCH", "tasks": tasks})
+    for k in tasks:
+        _w(pk, f"WATCH@{k}", {"choice": "now", "desk": "WATCH", "rank": 1, "tkey": k})
+    _w(pk, "ROUTER@H", {"choice": None, "desk": "ROUTER", "rank": None, "tkey": "H"})
+    added, skipped = picks.write_tasks(picks.queued_tasks(pk, dk), tmp_path / "c")
+    assert sorted(t.id for t in added) == ["pick-WATCH-P7", "pick-WATCH-P8"]
+    assert len(skipped) == 4 and not any("not found" in s["reason"] for s in skipped)
+    b = {t.id: t for t in added}["pick-WATCH-P8"].brief
+    assert "Owner decision: Yes" in b and "mind the mailbox" in b and "Router desk page" in b

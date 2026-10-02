@@ -29,6 +29,10 @@ RULES = (
 )
 
 
+HUMAN_OWNERS = {"owner", "you"}  # the real export also has "Novah", "novah-then-session", ...
+STARTABLE = {"open", "unverified", "todo"}  # real statuses: open, unverified, blocked, needs-owner
+
+
 def _docs(directory: str | Path) -> list[dict[str, Any]]:
     """Every *.json in `directory` as {id, data}; accepts {"id","data"} wrappers or bare data objects."""
     out = []
@@ -50,8 +54,9 @@ def queued_tasks(picks_dir: str | Path, desks_dir: str | Path) -> list[dict[str,
     for d in _docs(desks_dir):
         tasks = d["data"].get("tasks")
         if isinstance(tasks, dict):
-            desks[str(d["data"].get("desk") or d["id"])] = tasks
-            desks.setdefault(d["id"], tasks)
+            # the real export keys desks by lower-case id ("watch") while picks say "WATCH": match case-blind
+            desks[str(d["data"].get("desk") or d["id"]).lower()] = tasks
+            desks.setdefault(d["id"].lower(), tasks)
     queued = []
     for p in _docs(picks_dir):
         data = p["data"]
@@ -60,7 +65,7 @@ def queued_tasks(picks_dir: str | Path, desks_dir: str | Path) -> list[dict[str,
         desk, tkey = data.get("desk"), data.get("tkey")
         if (not desk or not tkey) and "~" in p["id"]:
             desk, tkey = p["id"].split("~", 1)
-        rec = (desks.get(str(desk)) or {}).get(str(tkey))
+        rec = (desks.get(str(desk).lower()) or {}).get(str(tkey))
         entry: dict[str, Any] = {"desk": desk, "tkey": tkey, "rank": data.get("rank")}
         if isinstance(rec, dict):
             entry.update({k: v for k, v in rec.items() if k not in entry})
@@ -81,10 +86,14 @@ def queued_tasks(picks_dir: str | Path, desks_dir: str | Path) -> list[dict[str,
 def skip_reason(entry: dict[str, Any]) -> str | None:
     if entry.get("missing"):
         return "task record not found in desks export"
-    if entry.get("owner") == "owner":
+    owner = str(entry.get("owner") or "").strip().lower()
+    if owner in HUMAN_OWNERS or owner.startswith("novah"):
         return "owner-only task (only Novah can do it)"
-    if entry.get("status") == "blocked":
+    status = str(entry.get("status") or "").strip().lower()
+    if status == "blocked":
         return "status is blocked"
+    if status not in STARTABLE:  # fail closed: needs-owner, done, or any status we have not seen
+        return f"status {status or 'missing'!r} is not startable"
     if "BLOCKED on" in str(entry.get("title", "")):
         return "title says BLOCKED on"
     return None
@@ -106,9 +115,13 @@ def build_brief(entry: dict[str, Any]) -> str:
         lines.append("The status and source above are UNVERIFIED claims: check them yourself first.")
     dec = entry.get("decision")
     if isinstance(dec, dict):
-        text = dec.get("text") or dec.get("decision") or dec.get("answer")
+        text = dec.get("text") or dec.get("decision") or dec.get("answer")  # real shape: answer/note/q/source
         if text:
             lines.append(f"Owner decision: {text}")
+        if dec.get("note"):
+            lines.append(f"Decision note: {dec['note']}")
+        if dec.get("source"):
+            lines.append(f"Decision source: {dec['source']}")
         cond = dec.get("conditions") or dec.get("condition")
         if cond:
             cond = "; ".join(map(str, cond)) if isinstance(cond, list) else cond
