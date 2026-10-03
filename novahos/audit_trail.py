@@ -9,15 +9,35 @@ This is the in-process / file-backed canonical audit (pure stdlib, no DB). The D
 `novahos.warden_audit` (substrate) is a downstream adapter for durable storage + querying; this
 module is what proves the chain wasn't tampered with.
 
-Payloads are stored as SHA-256 digests, not raw content, so the trail never becomes a second
-copy of sensitive data while still proving exactly what was acted on.
+Payloads are stored as digests, not raw content, so the trail never becomes a second copy of
+sensitive data while still proving exactly what was acted on.
+
+THE DIGEST IS KEYED WHEN A KEY IS PRESENT, AND SAYS WHICH IT IS (C9-F1 follow-up, 2026-10-02)
+──────────────────────────────────────────────────────────────────────────────────────────
+A plain SHA-256 over the canonical JSON is reversible by guessing whenever the payload has
+low entropy — and MCP tool arguments usually do (`{"email": "..."}`, `{"query": "..."}`).
+Anyone who can read the trail can confirm a guess against the digest, so the trail WAS a
+second copy of the data for every payload small enough to enumerate. With a key the digest
+is HMAC-SHA256 and a guess cannot be confirmed without it; the operator who holds the key can
+still prove exactly what was acted on.
+
+The key comes from `digest_key=` or, by default, the `WARDEN_AUDIT_DIGEST_KEY` environment
+variable (the same place `WARDEN_AUDIT_PATH` is read by every consumer). Without one the
+digest is still the plain hash — the kernel declares zero dependencies and must keep working
+on a bare install — but the digest is LABELLED: `sha256:<hex>` unkeyed, `hmac-sha256:<hex>`
+keyed, so a reader of the trail can see which guarantee each row carries instead of assuming
+one. A check that cannot establish a property must not look like one that did. Entries
+written before this change carry a bare 64-hex digest and still verify: the chain hash is
+over the stored string, whatever its shape.
 
 Ported into the kernel from the NovahPrime foundation as part of the consolidation (Phase 1).
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import threading
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
@@ -32,10 +52,35 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def digest_payload(payload: Any) -> str:
-    """Deterministic SHA-256 digest of an arbitrary JSON-serializable payload."""
-    canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+DIGEST_KEY_ENV = "WARDEN_AUDIT_DIGEST_KEY"
+
+
+def _coerce_key(key: bytes | str | None) -> bytes | None:
+    if key is None:
+        return None
+    if isinstance(key, str):
+        key = key.encode("utf-8")
+    return key or None
+
+
+def digest_key_from_env() -> bytes | None:
+    """The digest key the environment carries, or None. Read at trail construction, not at
+    import, so a process that sets the variable before building its Warden gets it."""
+    return _coerce_key(os.environ.get(DIGEST_KEY_ENV))
+
+
+def digest_payload(payload: Any, *, key: bytes | str | None = None) -> str:
+    """Deterministic, labelled digest of an arbitrary JSON-serializable payload.
+
+    `hmac-sha256:<hex>` when a key is given (a guess cannot be confirmed without it),
+    `sha256:<hex>` otherwise. The label is part of the value on purpose: two trails built
+    with and without a key must not be mistaken for each other.
+    """
+    canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    k = _coerce_key(key)
+    if k is not None:
+        return "hmac-sha256:" + hmac.new(k, canonical, hashlib.sha256).hexdigest()
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -88,10 +133,14 @@ class AuditTrail:
     a corrupt or tampered file raises AuditIntegrityError.
     """
 
-    def __init__(self, path: str | Path | None = None) -> None:
+    def __init__(self, path: str | Path | None = None, *,
+                 digest_key: bytes | str | None = None) -> None:
         self._path = Path(path) if path is not None else None
         self._entries: list[AuditEntry] = []
         self._lock = threading.Lock()
+        # None means "whatever the environment carries" (WARDEN_AUDIT_DIGEST_KEY), so the
+        # hub and the arms get keyed digests by setting one variable, with no call-site edit.
+        self._digest_key = _coerce_key(digest_key) if digest_key is not None else digest_key_from_env()
         if self._path is not None and self._path.exists():
             self._load_and_verify()
         elif self._path is not None:
@@ -124,7 +173,7 @@ class AuditTrail:
                 action_class=action_class,
                 decision=decision,
                 reasons=list(reasons or []),
-                payload_digest=digest_payload(payload),
+                payload_digest=digest_payload(payload, key=self._digest_key),
                 metadata=dict(metadata or {}),
                 prev_hash=prev_hash,
             )
@@ -137,6 +186,11 @@ class AuditTrail:
             return entry
 
     # --- reading / querying ---
+
+    @property
+    def digest_keyed(self) -> bool:
+        """True when new entries carry an HMAC digest (a key was given or found in the env)."""
+        return self._digest_key is not None
 
     def __len__(self) -> int:
         return len(self._entries)
