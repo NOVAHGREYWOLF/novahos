@@ -71,9 +71,14 @@ def evaluate(action: Action) -> Decision:
     if not action.authed:
         return Decision(BLOCK, "no authenticated identity", _con.AUTONOMY, tier,
                         _audit(BLOCK, "unauthenticated", _con.AUTONOMY))
-    if action.privacy_tier == _privacy.PRIVATE and action.destination == "third_party":
-        return Decision(BLOCK, "PRIVATE data cannot go to a third party", _con.SAFETY, tier,
-                        _audit(BLOCK, "private->third_party", _con.SAFETY))
+    # ALLOWLIST, not `== PRIVATE`. An equality check against one tier is blind to every tier
+    # added after it was written: LOCAL_ONLY is stricter than PRIVATE, so `== PRIVATE` would have
+    # waved it straight through to a third party. Ask "may this tier travel", not "is it THE one
+    # forbidden tier".
+    if action.destination == "third_party" and not _privacy.may_send_to_third_party(
+            action.privacy_tier):
+        return Decision(BLOCK, f"{action.privacy_tier} data cannot go to a third party",
+                        _con.SAFETY, tier, _audit(BLOCK, "no_egress->third_party", _con.SAFETY))
     if _consent.requires_approval(tier) and not action.approved:
         return Decision(ESCALATE, f"consent tier {tier} requires approval", _con.AUTONOMY, tier,
                         _audit(ESCALATE, "needs_approval", _con.AUTONOMY))
