@@ -19,10 +19,9 @@
 # echo all run 3.11 in their own CI while this kernel had only ever been measured on 3.12.
 # Testing the floor is testing what most consumers actually execute.
 #
-# RUNNER: needs a twelfth self-hosted container (`novahos`); eleven exist, one per repo. Until
-# NODE provisions it every job here queues forever, and a perpetually-pending check is worse
-# than no check because it reads as "still running" rather than "never ran". Merge this AFTER
-# the runner exists, not before.
+# RUNNER: GitHub-hosted (ubuntu-latest). This repo is public, so hosted minutes are free and
+# unmetered, and these jobs no longer queue behind the self-hosted box (CI-OVERFLOW). No job here
+# uses a secret, and none may: a hosted runner is not ours.
 name: tests
 
 # `push` is scoped to main on purpose. Unscoped, a branch with an open PR fires BOTH triggers
@@ -36,8 +35,7 @@ on:
     branches: [main]
   pull_request:
 
-# One run per ref. The box is sixteen cores shared with eleven runners and a ~5 Mbps link;
-# superseded runs should die rather than queue behind themselves.
+# One run per ref: superseded runs should die rather than queue behind themselves.
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
@@ -45,7 +43,7 @@ concurrency:
 jobs:
   bare-import:
     name: bare import (no extras, py${{ matrix.python }})
-    runs-on: [self-hosted, novah]
+    runs-on: ubuntu-latest
     # 30, not 10 and not the 360-minute default. A cold pip install crosses the same ~5 Mbps link
     # the local pip volume exists to spare, so a 10-minute budget dies on a cache miss rather than
     # on a real failure; leaving it unset lets a hung job sit for six hours looking busy. NODE
@@ -60,10 +58,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-          # NO `cache: pip` here, deliberately. On a self-hosted runner it fetches the Actions
-          # cache across the very link the mounted pip volume exists to avoid, and its post-job
-          # save has hung until the timeout killed an otherwise-green job. The runners already
-          # mount novah-pip-cache.
+          # NO `cache: pip`. It was left off for the self-hosted runners (whose post-job save
+          # hung a green job); on hosted runners the install is small enough not to need it.
       # `pip install .` with NO extras and NO -e, deliberately: this must exercise the
       # INSTALLED distribution's metadata, not the source tree on sys.path. A source-tree
       # run would pass while the built package was still missing a dependency.
@@ -90,7 +86,7 @@ jobs:
 
   suite:
     name: pytest (py${{ matrix.python }})
-    runs-on: [self-hosted, novah]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
