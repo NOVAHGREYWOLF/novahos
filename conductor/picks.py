@@ -9,6 +9,10 @@ picks/*.json and desks/*.json. This module reads those exports, so it never touc
 writes/merges <out>/tasks.json and <out>/picks-skipped.json. Then run the existing tick. Only picks with
 choice == "now" are ever queued; owner-only and blocked tasks are skipped with a reason, never started.
 Pure and stdlib-only. Doc shape is {"id":..,"data":{...}} or the data object itself.
+
+The tasks carry the owner's queue text (titles, decisions) in their `brief`. In a public repo never commit
+the output (the default --out is the tracked .conductor/): point --out at a private directory instead.
+A missing export directory or a file that is not valid JSON stops the run with an error naming it (exit 1).
 """
 from __future__ import annotations
 
@@ -34,10 +38,20 @@ STARTABLE = {"open", "unverified", "todo"}  # real statuses: open, unverified, b
 
 
 def _docs(directory: str | Path) -> list[dict[str, Any]]:
-    """Every *.json in `directory` as {id, data}; accepts {"id","data"} wrappers or bare data objects."""
+    """Every *.json in `directory` as {id, data}; accepts {"id","data"} wrappers or bare data objects.
+
+    Raises ValueError naming the directory (not a directory) or the file (unreadable or not JSON): a missing
+    export directory must not read as "nothing is queued".
+    """
+    d = Path(directory)
+    if not d.is_dir():
+        raise ValueError(f"{d}: not a directory")
     out = []
-    for f in sorted(Path(directory).glob("*.json")):
-        raw = json.loads(f.read_text(encoding="utf-8"))
+    for f in sorted(d.glob("*.json")):
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+        except ValueError as e:  # JSONDecodeError and UnicodeDecodeError are both ValueErrors
+            raise ValueError(f"{f}: not valid JSON ({e})") from e
         if not isinstance(raw, dict):
             continue
         data = raw["data"] if isinstance(raw.get("data"), dict) else raw
@@ -140,12 +154,18 @@ def write_tasks(entries: list[dict[str, Any]], out_dir: str | Path) -> tuple[lis
     """Merge queued entries into <out>/tasks.json (existing tasks, incl. their status, are never altered).
 
     Returns (tasks added, skipped list of {id, title, reason}); also writes <out>/picks-skipped.json.
+    An id already in tasks.json is skipped silently (planned earlier, possibly running or done). Two picks of
+    one batch that map to the same id (the id is sanitized and capped at 80 characters, so this can happen) are
+    not silent: the first by rank owns the id (queued, or already planned) and the other is listed in the
+    skipped list with the reason, on every run. A later batch that holds only the second pick cannot tell it
+    from the first, which is the one case left silent.
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     tpath = out / "tasks.json"
     existing = load_tasks(tpath) if tpath.exists() else []
-    have = {t.id for t in existing}
+    planned = {t.id for t in existing}
+    claimed: dict[str, str] = {}  # id -> "desk/tkey" of the pick of this batch that took it
     added: list[Task] = []
     skipped: list[dict[str, str]] = []
     for e in entries:
@@ -154,9 +174,13 @@ def write_tasks(entries: list[dict[str, Any]], out_dir: str | Path) -> tuple[lis
             skipped.append({"id": task_id(e), "title": str(e.get("title")), "reason": reason})
             continue
         t = to_task(e)
-        if t.id in have:
+        if t.id in claimed:  # checked before `planned`, so a collision stays listed on every re-run
+            skipped.append({"id": t.id, "title": str(e.get("title")),
+                            "reason": f"task id {t.id!r} already taken by queued pick {claimed[t.id]} in this batch"})
+            continue
+        claimed[t.id] = f"{e.get('desk')}/{e.get('tkey')}"
+        if t.id in planned:
             continue  # already planned (possibly running or done): never reset it
-        have.add(t.id)
         added.append(t)
     assign_models(added)
     save_tasks(existing + added, tpath)
