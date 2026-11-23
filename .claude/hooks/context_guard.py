@@ -3,8 +3,8 @@
 
 Why: cost grows with context size (every turn re-reads the whole history). On the board's
 own numbers, sessions finishing under 100k averaged $0.68, 150-200k $3.00, 200-300k $4.65.
-The 150k rule existed but was only a sentence in a brief; nothing measured it. This hook
-measures it.
+The limits existed but were only a sentence in a brief; nothing measured them. This hook
+measures them. Limits are sized by the owner's 2026-10-01 policy (weekly usage is low, so bigger sessions).
 
 How: runs on PostToolUse and UserPromptSubmit. Reads the tail of the session transcript, takes
 the LAST main-thread assistant message's usage (input + cache_read + cache_creation = the size
@@ -25,6 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Standalone (copied into other repos), so no import; tests/test_session_budget.py keeps these equal to conductor/policy.py.
 # Owner policy 2026-10-01: soft 300k, hard 450k.
 SOFT_DEFAULT = 300_000
 HARD_DEFAULT = 450_000

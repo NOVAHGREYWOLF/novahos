@@ -10,7 +10,7 @@ GOLDEN = Path(__file__).parent / "fixtures" / "conductor_report.md"
 SEP = "\n<!-- case -->\n"
 
 
-def P(auto=False, soft=100_000, hard=150_000):
+def P(auto=False, soft=5_000_000, hard=8_000_000):
     return Project("Demo", "demo", "Ship the demo.", auto, Budget(soft, hard))
 
 
@@ -27,7 +27,7 @@ def all_statuses():
 
 
 def cases():
-    over = [Task("x", "big", status="done", model="opus", session_id="s_x", cost_usd=12, context_tokens=160_000)]
+    over = [Task("x", "big", status="done", model="opus", session_id="s_x", cost_usd=12, context_tokens=9_000_000)]
     return [
         ("empty", report.render(P(), [])),
         ("all-statuses", report.render(P(), all_statuses(), ["Use Sonnet for ticks"], ["Keep steps small"], ["Confirm weekly reset"])),
@@ -61,7 +61,7 @@ def test_archive_policy():
 
 
 def test_over_budget_flag():
-    assert "OVER HARD BUDGET" in report.render(P(), [Task("x", "t", context_tokens=200_000)])
+    assert "OVER HARD BUDGET" in report.render(P(), [Task("x", "t", context_tokens=9_000_000)])
     assert "within budget" in report.render(P(), [])
 
 

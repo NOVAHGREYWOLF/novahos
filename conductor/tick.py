@@ -1,23 +1,24 @@
 """One conductor tick as a pure function: tick(state) -> list of actions.
 
 Stdlib only, no I/O, no clock. A runner executes the actions and writes results back to tasks.json.
-Budget is measured like report.py: sum of Task.context_tokens against project.budget (soft/hard).
+Budget is measured like report.py: sum of Task.context_tokens against project.budget (soft/hard, the project TOTAL).
+Per-session limits (project.per_session) apply to each tracked task on its own.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import policy
 from .plan import Project, Task, ready_tasks
 
-# Owner's size policy (2026-10-01): reuse an idle session only under 200k tokens; Haiku tasks stay under 150k.
-# Same numbers as the handoff / route-and-spawn skills.
-REUSE_BELOW_TOKENS = 200_000
-REUSE_BELOW_TOKENS_HAIKU = 150_000
 
+def reuse_limit(project: Project, task: Task) -> int:
+    """Context size under which an idle session may be reused for this task.
 
-def reuse_limit(task: Task) -> int:
-    """Context size under which an idle session may be reused for this task."""
-    return REUSE_BELOW_TOKENS_HAIKU if task.model == "haiku" else REUSE_BELOW_TOKENS
+    The project's per_session.reuse_below (policy.REUSE_BELOW, 200k, unless overridden); a Haiku task is
+    held to policy.HAIKU_MAX (150k) because its window is 200k.
+    """
+    return min(project.reuse_below, policy.HAIKU_MAX) if task.model == "haiku" else project.reuse_below
 
 
 @dataclass
@@ -29,7 +30,8 @@ class State:
 
 @dataclass(frozen=True)
 class Action:
-    """kind: start_fresh | start_reuse | archive | archive_candidate | stop_soft | stop_hard."""
+    """kind: start_fresh | start_reuse | archive | archive_candidate | stop_soft | stop_hard |
+    handoff_due | stop_session (the last two are per task and never block starts)."""
     kind: str
     task_id: str | None = None
     session_id: str | None = None
@@ -51,8 +53,24 @@ def budget_level(project: Project, tasks: list[Task]) -> str | None:
     return None
 
 
+def session_actions(project: Project, tasks: list[Task]) -> list[Action]:
+    """Per-session limits: handoff_due above per_session.soft, stop_session (list only) above per_session.hard."""
+    out = []
+    lim = project.per_session
+    for t in tasks:
+        if not t.session_id or t.status not in ("doing", "pr", "review"):
+            continue
+        if t.context_tokens > lim.hard:
+            out.append(Action("stop_session", t.id, t.session_id,
+                              f"{t.context_tokens} context tokens > per-session hard {lim.hard}"))
+        elif t.context_tokens > lim.soft:
+            out.append(Action("handoff_due", t.id, t.session_id,
+                              f"{t.context_tokens} context tokens > per-session soft {lim.soft}"))
+    return out
+
+
 def tick(state: State) -> list[Action]:
-    """Actions for this tick, in order: stops, archive handling, then task starts.
+    """Actions for this tick, in order: stops, per-session handoff/stop, archive handling, then task starts.
 
     Soft budget stops new starts (in-flight work finishes); hard budget stops everything
     except housekeeping. Archive actions are emitted only when project.auto_archive is true;
@@ -67,6 +85,8 @@ def tick(state: State) -> list[Action]:
         limit = p.budget.hard if level == "hard" else p.budget.soft
         actions.append(Action(f"stop_{level}", reason=f"{total} context tokens > {level} budget {limit}"))
 
+    actions.extend(session_actions(p, tasks))
+
     for t in archive_candidates(tasks):
         if p.auto_archive:
             actions.append(Action("archive", t.id, t.session_id, "done and auto_archive is on"))
@@ -75,7 +95,7 @@ def tick(state: State) -> list[Action]:
 
     if level is None:
         for t in ready_tasks(tasks, state.max_parallel):
-            limit = reuse_limit(t)
+            limit = reuse_limit(p, t)
             if t.session_id and t.context_tokens < limit:
                 actions.append(Action("start_reuse", t.id, t.session_id,
                                       f"{t.context_tokens} < {limit} context tokens"))

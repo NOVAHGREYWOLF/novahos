@@ -25,8 +25,8 @@ No spend.
 
 - Total spend: $0.00
 - Total context tokens: 0
-- Soft budget: 100,000 tokens (ok)
-- Hard budget: 150,000 tokens (ok)
+- Soft budget: 5,000,000 tokens (ok)
+- Hard budget: 8,000,000 tokens (ok)
 - Status: **within budget**
 
 ## Archive candidates
@@ -94,8 +94,8 @@ By model:
 
 - Total spend: $5.55
 - Total context tokens: 96,000
-- Soft budget: 100,000 tokens (ok)
-- Hard budget: 150,000 tokens (ok)
+- Soft budget: 5,000,000 tokens (ok)
+- Hard budget: 8,000,000 tokens (ok)
 - Status: **within budget**
 
 ## Archive candidates
@@ -167,7 +167,7 @@ By model:
 - Total spend: $5.55
 - Total context tokens: 96,000
 - Soft budget: 50,000 tokens (exceeded)
-- Hard budget: 150,000 tokens (ok)
+- Hard budget: 8,000,000 tokens (ok)
 - Status: **OVER SOFT BUDGET**
 
 ## Archive candidates
@@ -210,20 +210,20 @@ By task:
 
 | task | model | cost | context tokens |
 |---|---|---|---|
-| x | opus | $12.00 | 160,000 |
+| x | opus | $12.00 | 9,000,000 |
 
 By model:
 
 | model | tasks | cost | context tokens |
 |---|---|---|---|
-| opus | 1 | $12.00 | 160,000 |
+| opus | 1 | $12.00 | 9,000,000 |
 
 ## Budget
 
 - Total spend: $12.00
-- Total context tokens: 160,000
-- Soft budget: 100,000 tokens (exceeded)
-- Hard budget: 150,000 tokens (exceeded)
+- Total context tokens: 9,000,000
+- Soft budget: 5,000,000 tokens (exceeded)
+- Hard budget: 8,000,000 tokens (exceeded)
 - Status: **OVER HARD BUDGET**
 
 ## Archive candidates
@@ -293,8 +293,8 @@ By model:
 
 - Total spend: $5.55
 - Total context tokens: 96,000
-- Soft budget: 100,000 tokens (ok)
-- Hard budget: 150,000 tokens (ok)
+- Soft budget: 5,000,000 tokens (ok)
+- Hard budget: 8,000,000 tokens (ok)
 - Status: **within budget**
 
 ## Archive candidates
@@ -364,8 +364,8 @@ By model:
 
 - Total spend: $5.55
 - Total context tokens: 96,000
-- Soft budget: 100,000 tokens (ok)
-- Hard budget: 150,000 tokens (ok)
+- Soft budget: 5,000,000 tokens (ok)
+- Hard budget: 8,000,000 tokens (ok)
 - Status: **within budget**
 
 ## Archive candidates
