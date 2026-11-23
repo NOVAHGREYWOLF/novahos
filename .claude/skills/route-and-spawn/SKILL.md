@@ -26,4 +26,4 @@ On the board task write `session_id`, `model`, `model_id`, `started_at`; on fini
 After a child opens a PR it hands off and stops. If CI goes red, start a **new small session** (Sonnet) with a two-line brief: repo, PR number, "make CI green, minimal fix, then stop". Do not wake the original session.
 
 ## 6. Every work block
-Check your own `used_tokens`. At 90k write your coordinator handoff (see `handoff` skill) and start a successor.
+Check your own `used_tokens`. At 200k write your coordinator handoff (see `handoff` skill) and start a successor.

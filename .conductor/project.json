@@ -4,7 +4,7 @@
   "goal": "Track, finish and archive all NovahOS Claude Code sessions and PRs through the conductor.",
   "auto_archive": true,
   "budget": {
-    "soft": 100000,
-    "hard": 150000
+    "soft": 5000000,
+    "hard": 8000000
   }
 }
