@@ -9,7 +9,15 @@ from dataclasses import dataclass, field
 
 from .plan import Project, Task, ready_tasks
 
-REUSE_BELOW_TOKENS = 60_000  # same threshold as the handoff / route-and-spawn skills
+# Owner's size policy (2026-10-01): reuse an idle session only under 200k tokens; Haiku tasks stay under 150k.
+# Same numbers as the handoff / route-and-spawn skills.
+REUSE_BELOW_TOKENS = 200_000
+REUSE_BELOW_TOKENS_HAIKU = 150_000
+
+
+def reuse_limit(task: Task) -> int:
+    """Context size under which an idle session may be reused for this task."""
+    return REUSE_BELOW_TOKENS_HAIKU if task.model == "haiku" else REUSE_BELOW_TOKENS
 
 
 @dataclass
@@ -67,10 +75,11 @@ def tick(state: State) -> list[Action]:
 
     if level is None:
         for t in ready_tasks(tasks, state.max_parallel):
-            if t.session_id and t.context_tokens < REUSE_BELOW_TOKENS:
+            limit = reuse_limit(t)
+            if t.session_id and t.context_tokens < limit:
                 actions.append(Action("start_reuse", t.id, t.session_id,
-                                      f"{t.context_tokens} < {REUSE_BELOW_TOKENS} context tokens"))
+                                      f"{t.context_tokens} < {limit} context tokens"))
             else:
-                why = "no session yet" if not t.session_id else f"{t.context_tokens} >= {REUSE_BELOW_TOKENS} context tokens"
+                why = "no session yet" if not t.session_id else f"{t.context_tokens} >= {limit} context tokens"
                 actions.append(Action("start_fresh", t.id, None, why))
     return actions

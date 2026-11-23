@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from .plan import STATUSES, Project, Task
+from .plan import STATUSES, Project, Task, effective_lane
 
 
 def _cell(text: object) -> str:
@@ -47,8 +47,13 @@ def render(project: Project, tasks: list[Task], decisions: Iterable[str] = (),
     counts = ", ".join(f"{s} {sum(t.status == s for t in tasks)}" for s in STATUSES)
     L += [f"{len(tasks)} task(s): {counts}.", ""]
     if tasks:
-        L += _table(["id", "title", "status", "model", "PR"],
-                    [[t.id, t.title, t.status, t.model or "-", _pr(t)] for t in tasks])
+        lanes = [effective_lane(project, t) for t in tasks]
+        if any(lanes):  # the Lane column appears only when some task has a lane (own or project default)
+            L += _table(["id", "Lane", "title", "status", "model", "PR"],
+                        [[t.id, ln or "-", t.title, t.status, t.model or "-", _pr(t)] for t, ln in zip(tasks, lanes)])
+        else:
+            L += _table(["id", "title", "status", "model", "PR"],
+                        [[t.id, t.title, t.status, t.model or "-", _pr(t)] for t in tasks])
     else:
         L += ["No tasks."]
     L.append("")

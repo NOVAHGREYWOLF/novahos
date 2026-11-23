@@ -102,3 +102,82 @@ def test_save_load_round_trip(tmp_path):
     proj = plan.Project("P", "p", "g", True, plan.Budget(1, 2))
     plan.save_project(proj, tmp_path / "project.json")
     assert plan.load_project(tmp_path / "project.json") == proj
+
+
+# ----------------------------------------------------------------------- lanes
+
+ALL_LANES = ("ROUTER", "SENSORS", "DOORS", "INTELLIGENCE", "ARMS", "NODE", "SURFACE", "LAB", "MONEY", "VAULT",
+             "SUITE", "ROUNDTRIP", "COMMS", "FIELD", "PRIVACY", "PRODUCT", "WATCH", "MARKET", "BRAIN", "WEBSITES")
+
+
+def test_lane_set_is_the_owners_list():
+    assert plan.LANES == ALL_LANES
+
+
+@pytest.mark.parametrize("lane", ALL_LANES)
+def test_valid_lane_on_task_and_project(lane):
+    plan.validate([T("a", lane=lane)])
+    assert plan.project_from_dict({"name": "P", "slug": "p", "goal": "g", "lane": lane}).lane == lane
+
+
+@pytest.mark.parametrize("lane", ["router", "Router", "NOPE", "", " ROUTER", 7, ["ROUTER"], True])
+def test_invalid_task_lane_is_rejected_with_a_clear_error(lane):
+    with pytest.raises(PlanError, match=r"task 'a': invalid lane .* \(one of ROUTER, SENSORS, .*WEBSITES; upper-case\)"):
+        plan.validate([T("a", lane=lane)])
+
+
+@pytest.mark.parametrize("lane", ["router", "NOPE", "", 7])
+def test_invalid_project_lane_is_rejected(lane):
+    with pytest.raises(PlanError, match=r"project: invalid lane .* \(one of ROUTER, .*WEBSITES; upper-case\)"):
+        plan.project_from_dict({"name": "P", "slug": "p", "goal": "g", "lane": lane})
+
+
+def test_lane_defaults_to_none_and_other_unknown_fields_still_rejected():
+    assert T("a").lane is None
+    assert plan.project_from_dict({"name": "P", "slug": "p", "goal": "g"}).lane is None
+    with pytest.raises(PlanError, match="unknown field"):
+        plan.task_from_dict({"id": "a", "title": "A", "lanes": "ROUTER"})
+    assert plan.task_from_dict({"id": "a", "title": "A", "lane": "MONEY"}).lane == "MONEY"
+
+
+def test_invalid_lane_is_rejected_on_load_and_save(tmp_path):
+    (tmp_path / "tasks.json").write_text(json.dumps([{"id": "a", "title": "A", "lane": "nope"}]))
+    with pytest.raises(PlanError, match="invalid lane"):
+        plan.load_tasks(tmp_path / "tasks.json")
+    with pytest.raises(PlanError, match="invalid lane"):
+        plan.save_tasks([T("a", lane="nope")], tmp_path / "out.json")
+
+
+def test_project_default_lane_and_task_override():
+    proj = plan.Project("P", "p", "g", lane="MONEY")
+    assert plan.effective_lane(proj, T("a")) == "MONEY"
+    assert plan.effective_lane(proj, T("b", lane="ROUTER")) == "ROUTER"
+    assert plan.effective_lane(plan.Project("P", "p", "g"), T("c")) is None
+    assert plan.effective_lane(plan.Project("P", "p", "g"), T("d", lane="LAB")) == "LAB"
+
+
+def test_lane_round_trips_and_is_omitted_when_none(tmp_path):
+    tasks = [T("a", lane="INTELLIGENCE"), T("b")]
+    plan.save_tasks(tasks, tmp_path / "tasks.json")
+    raw = json.loads((tmp_path / "tasks.json").read_text())
+    assert raw[0]["lane"] == "INTELLIGENCE" and "lane" not in raw[1]
+    assert plan.load_tasks(tmp_path / "tasks.json") == tasks
+    with_lane = plan.Project("P", "p", "g", True, plan.Budget(1, 2), "MONEY")
+    plan.save_project(with_lane, tmp_path / "project.json")
+    assert json.loads((tmp_path / "project.json").read_text())["lane"] == "MONEY"
+    assert plan.load_project(tmp_path / "project.json") == with_lane
+    plain = plan.Project("P", "p", "g")
+    plan.save_project(plain, tmp_path / "project2.json")
+    assert "lane" not in json.loads((tmp_path / "project2.json").read_text())
+    assert plan.load_project(tmp_path / "project2.json") == plain
+
+
+def test_existing_files_without_lane_are_byte_stable(tmp_path):
+    original = [{"id": "a", "title": "A", "effort": "medium", "envelope": "standard", "depends": [], "model": None,
+                 "model_pin": None, "status": "todo", "session_id": None, "pr": None, "cost_usd": 0.0,
+                 "context_tokens": 0}]
+    path = tmp_path / "tasks.json"
+    path.write_text(json.dumps(original, indent=2) + "\n")
+    before = path.read_text()
+    plan.save_tasks(plan.load_tasks(path), path)
+    assert path.read_text() == before

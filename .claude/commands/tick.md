@@ -1,1 +1,1 @@
-Run one conductor tick for this repo's `.conductor/` plan: follow the `conductor` skill, section /tick. One pass, no polling, no wake-ups.
+Run one conductor tick for this repo's `.conductor/` plan: follow the `conductor` skill, section /tick, starting with its step 0 (TOOLS CHECK: if the session tools are missing, reply `STATUS: NEEDS-NOVAH | routine has no connectors` and stop). One pass, no polling, no wake-ups.

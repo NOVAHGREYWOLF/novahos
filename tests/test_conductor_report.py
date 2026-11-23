@@ -68,3 +68,34 @@ def test_over_budget_flag():
 def test_write_report(tmp_path):
     text = report.write_report(tmp_path / "report.md", P(), [])
     assert (tmp_path / "report.md").read_text() == text
+
+
+def test_lane_column_only_when_a_task_has_a_lane():
+    plain = report.render(P(), all_statuses())
+    assert "| id | title | status | model | PR |" in plain and "Lane" not in plain
+    tasks = all_statuses()
+    tasks[0].lane = "INTELLIGENCE"
+    tasks[4].lane = "MONEY"
+    got = report.render(P(), tasks)
+    assert "| id | Lane | title | status | model | PR |" in got
+    assert "|---|---|---|---|---|---|" in got
+    assert "| a | INTELLIGENCE | plan \\| schema | done | sonnet | #26 |" in got
+    assert "| e | MONEY | cloud | blocked | - | - |" in got
+    assert "| b | - | report | review | sonnet | #27 |" in got  # a task without a lane shows "-"
+    # only the Tasks table changes; every other section is identical to the no-lane render
+    assert got.split("## Cost", 1)[1] == plain.split("## Cost", 1)[1]
+
+
+def test_lane_column_uses_project_default_lane():
+    proj = P()
+    proj.lane = "ROUTER"
+    got = report.render(proj, [Task("a", "t"), Task("b", "u", lane="MONEY")])
+    assert "| id | Lane | title | status | model | PR |" in got
+    assert "| a | ROUTER | t | todo | - | - |" in got and "| b | MONEY | u | todo | - | - |" in got
+    assert "Lane" not in report.render(P(), [Task("a", "t")])
+
+
+def test_lane_report_is_deterministic():
+    tasks = all_statuses()
+    tasks[1].lane = "ARMS"
+    assert report.render(P(), tasks) == report.render(P(), tasks)

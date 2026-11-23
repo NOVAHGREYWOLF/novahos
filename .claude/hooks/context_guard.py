@@ -13,8 +13,8 @@ into the model's context. It never blocks a tool and never raises: a broken guar
 break a session.
 
 Env (all optional):
-    SESSION_SOFT_TOKENS   default 100000  -> "finish this step, write the handoff, stop"
-    SESSION_HARD_TOKENS   default 150000  -> "stop now"
+    SESSION_SOFT_TOKENS   default 300000  -> "finish this step, write the handoff, stop"
+    SESSION_HARD_TOKENS   default 450000  -> "stop now"
     SESSION_GUARD_OFF=1                   -> disable
 """
 from __future__ import annotations
@@ -25,8 +25,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-SOFT_DEFAULT = 100_000
-HARD_DEFAULT = 150_000
+# Owner policy 2026-10-01: soft 300k, hard 450k.
+SOFT_DEFAULT = 300_000
+HARD_DEFAULT = 450_000
 TAIL_BYTES = 768 * 1024
 REWARN_EVERY = 10_000  # re-nag after this many more tokens, so it is heard but not spammy
 
