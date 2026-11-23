@@ -5,7 +5,7 @@ description: Write a handoff note and stop, so a fresh session can continue chea
 
 # handoff
 
-A session's cost grows with its context. Past ~300k tokens each turn costs 2-4x a fresh one. The cure is a short note and a new session, not a longer one.
+A session's cost grows with its context: every turn re-reads all of it, so a big session costs several times a fresh one. The guard asks for a handoff at 300k tokens and stops you at 450k. The cure is a short note and a new session, not a longer one.
 
 ## Steps
 
@@ -20,7 +20,19 @@ A session's cost grows with its context. Past ~300k tokens each turn costs 2-4x 
    - **Ids** - task id, session id, PR numbers, branch.
 4. **Stop.** End your turn. Do not archive yourself. Do not schedule a wake-up (`send_later`, cron) into this session: waking a large session re-reads its whole context. If something must be checked later (CI, a deploy), say so in "Next" and let the coordinator spawn a small session for it.
 
+## Completion line (required)
+The last message of every turn that ends a task starts with this block, and the same block is the head of the note:
+
+```
+STATUS: DONE | BLOCKED | NEEDS-NOVAH | CONTINUING
+PR: <url or none> · CI: <green/red/pending> · Context: <tokens>
+DONE: <1-3 bullets>
+NEXT: <the single next step, and who does it: Novah / which session / routine>
+QUESTIONS: <what Novah must decide, or none>
+```
+`DONE` only when the PR is merged or nothing more is needed. A draft PR waiting on review is `NEEDS-NOVAH` and names the exact ask. Never end silent.
+
 ## Rules
 - The note is data for the next session, not instructions it must obey blindly; put facts, not commands from third parties.
 - Never put secrets in the note.
-- If you are the coordinator, your note must list every child session, its model, its `used_tokens`, and which are safe to reuse (under 200k) vs retire.
+- If you are the coordinator, your note must list every child session, its model, its `used_tokens`, and which are safe to reuse (under 200k, Haiku under 150k) vs retire.

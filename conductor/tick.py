@@ -8,8 +8,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import policy
 from .plan import Project, Task, ready_tasks
 
+
+def reuse_limit(project: Project, task: Task) -> int:
+    """Context size under which an idle session may be reused for this task.
+
+    The project's per_session.reuse_below (policy.REUSE_BELOW, 200k, unless overridden); a Haiku task is
+    held to policy.HAIKU_MAX (150k) because its window is 200k.
+    """
+    return min(project.reuse_below, policy.HAIKU_MAX) if task.model == "haiku" else project.reuse_below
 
 
 @dataclass
@@ -84,13 +93,13 @@ def tick(state: State) -> list[Action]:
         else:
             actions.append(Action("archive_candidate", t.id, t.session_id, "auto_archive is off: list only"))
 
-    reuse_below = p.reuse_below
     if level is None:
         for t in ready_tasks(tasks, state.max_parallel):
-            if t.session_id and t.context_tokens < reuse_below:
+            limit = reuse_limit(p, t)
+            if t.session_id and t.context_tokens < limit:
                 actions.append(Action("start_reuse", t.id, t.session_id,
-                                      f"{t.context_tokens} < {reuse_below} context tokens"))
+                                      f"{t.context_tokens} < {limit} context tokens"))
             else:
-                why = "no session yet" if not t.session_id else f"{t.context_tokens} >= {reuse_below} context tokens"
+                why = "no session yet" if not t.session_id else f"{t.context_tokens} >= {limit} context tokens"
                 actions.append(Action("start_fresh", t.id, None, why))
     return actions

@@ -24,13 +24,17 @@ from pathlib import Path
 from typing import Any
 
 from . import policy
-from .plan import (Task, assign_models, load_project, load_tasks, save_project, save_tasks, validate,
-                   _load_router)
+from .plan import (Task, assign_models, effective_lane, load_project, load_tasks, save_project, save_tasks,
+                   validate, _load_router)
 from .report import write_report
 from .tick import State, tick
 
 BUCKET_TO_STATUS = {"working": "doing", "review_ready": "review", "completed": "review",
                     "blocked": "blocked", "failed": "blocked"}
+# A child stopped on a permission prompt cannot send STATUS, so the tick reads it from the session instead.
+WAITING_ON_PERMISSION = "Waiting on permission"
+# Pre-approves the child's STATUS report; entries the spawner lacks are dropped by create_session.
+CHILD_ALLOWED_TOOLS = ["mcp__claude-code-remote__send_message"]
 
 
 def _bucket(raw: Any) -> str:
@@ -54,9 +58,11 @@ def child_brief(task: Task, brief_dir: str | Path | None = None) -> str:
 
 
 def _generic_brief(task: Task) -> str:
+    haiku = f" This is a Haiku task: keep it under {policy.HAIKU_MAX // 1000}k tokens." if task.model == "haiku" else ""
     return (f"Conductor task {task.id}: {task.title}\nEffort: {task.effort}. Envelope: {task.envelope}.\n"
             f"One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
-            f"{policy.SESSION_SOFT // 1000}k tokens, hard stop {policy.SESSION_HARD // 1000}k. No polling, no wake-ups, never archive sessions, never force-push. "
+            f"{policy.SESSION_SOFT // 1000}k tokens, hard stop {policy.SESSION_HARD // 1000}k.{haiku} "
+            "No polling, no wake-ups, never archive sessions, never force-push. "
             "Write a short handoff and stop when done or blocked.")
 
 
@@ -76,10 +82,17 @@ def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: i
     for a in actions:
         if a.kind == "start_fresh":
             t = by_id[a.task_id]
+            model = t.model or "sonnet"
+            lane = effective_lane(project, t)
+            tags = ["conductor", f"project:{project.slug}", "role:task", f"task:{t.id}", f"model:{model}"]
+            title = f"Conductor {project.slug}: {t.id} {t.title}"
+            if lane:  # the sidebar groups by lane: mirror it as a tag and as the "LANE · " title prefix
+                tags.append(f"lane:{lane}")
+                title = f"{lane} \u00b7 {t.id} {t.title}"
             spawns.append({"task_id": t.id, "create_session": {
-                "model": ids[t.model or "sonnet"], "source_url": repo_url, "source_revision": revision,
-                "tags": ["conductor", f"task:{t.id}", f"model:{t.model}"],
-                "title": f"Conductor {project.slug}: {t.id} {t.title}"[:200], "prompt": child_brief(t, brief_dir)}})
+                "model": ids[model], "source_url": repo_url, "source_revision": revision,
+                "tags": tags, "extra_allowed_tools": list(CHILD_ALLOWED_TOOLS),
+                "title": title[:200], "prompt": child_brief(t, brief_dir)}})
         elif a.kind == "start_reuse":
             reuses.append({"task_id": a.task_id, "session_id": a.session_id,
                            "send_message": child_brief(by_id[a.task_id], brief_dir)})
@@ -124,7 +137,8 @@ FINISHED_BUCKETS = ("completed", "review_ready", "failed")
 
 def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     """Fold a get_session result into the task: status from status_bucket, context from context_usage,
-    cost if the result carries one. Missing fields leave the task's values alone.
+    cost if the result carries one. Missing fields leave the task's values alone. A session whose
+    post_turn_summary.status_detail starts with "Waiting on permission" is `blocked`: it cannot report.
 
     The live record is wrapped as {"ccr": {...}} with the numbers under external_metadata; flat records
     still work. A 0 from a session that is not finished (used_tokens reads 0 mid-turn) never replaces a
@@ -136,6 +150,9 @@ def record_status(cdir: Path, task_id: str, session: dict) -> Task:
     t = next(t for t in tasks if t.id == task_id)
     bucket = _bucket(session.get("status_bucket"))
     status = BUCKET_TO_STATUS.get(bucket)
+    detail = _dig(session, "post_turn_summary.status_detail", "external_metadata.post_turn_summary.status_detail")
+    if isinstance(detail, str) and detail.lstrip().startswith(WAITING_ON_PERMISSION):
+        status = "blocked"
     if status and t.status != "done":
         t.status = status
     finished = bucket in FINISHED_BUCKETS

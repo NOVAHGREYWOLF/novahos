@@ -55,6 +55,10 @@ same files, so they never disagree. The board (ArtifactData) is a *view* synced 
 - Hook behaviour in `create_session` sessions: unverified.
 - The install of the kit into the other repos is blocked on `add_repo` permission (session_013enoai3KJ3s6X4ZKUcHpW3).
 - Weekly limit reset: 2026-10-03 21:00 UTC; the Sonnet/Haiku-only hold on ticks was lifted by the owner on 2026-10-01.
+- Pre-approval via `extra_allowed_tools` is unproven (spawned sessions may stop on a permission prompt), so reporting is pull-first: the tick reads each session's latest `STATUS:` line with `list_events`.
+- Routines need connectors set in the claude.ai routines UI (`create_trigger`'s `connectors` parameter is not available for this org); see `CONDUCTOR_ROUTINE.md`.
+- The kit was not on main until the stack merged (the PRs were stacked on `claude/conductor-done`).
+- Size numbers in the older handoff sections (reuse under 60k, handoff at 100k, hard stop 150k, plan budget 100k/150k) are superseded by the owner's 2026-10-01 policy: reuse an idle session under 200k (Haiku 150k), guard soft 300k / hard 450k, project budget set per project in `project.json` (leadfuel-reports: soft 5M / hard 8M). A `project.json` with no `budget` now gets the policy totals (5M/8M, `conductor/policy.py`); only a `Project(...)` built in code without one still gets `Budget()` (100k/150k).
 
 ## Handoff (from the design session)
 Done: session-budget kit merged (#24); board has RULE-session-budget, TEMPLATE-child-brief, TEMPLATE-babysit-brief.
@@ -72,6 +76,89 @@ Gotchas:
 - `ready_tasks` counts doing/pr/review tasks against `max_parallel`.
 - Valid envelopes: standard, production, critical, door; efforts: small, low, medium, high, xhigh.
 - `pip install pytest` may be needed in a fresh cloud session (not preinstalled).
+
+## Reports program link
+Written 2026-10-01 by a read-only coordination session. Sources: `get_session`/`list_events` on the four sessions below and
+`get_trigger` on the nightly routine. No session was messaged, interrupted or archived. Session snapshots are from
+2026-09-30 (last activity) unless noted, so re-check status before acting. Related: #25 (design), #26 (build step 1).
+
+### Who owns the command book
+The briefing/command book ("Your command book · <date>", from NovahPrime, ~12:10 UTC) is built in
+**NOVAHGREYWOLF/novahub**, in `command_book.py` (`compose` builds a `book` dict; `book['needs_you']` is rendered to HTML and
+plain text). All four sessions were created on novahub. It is fed by modules that `compose` calls fail-soft
+(e.g. `relevance_questions(owner)`, `mail_auto_archive.recent_auto_archives(owner, hours=48)`). Decision A in that program:
+**one email**. The leadfuel repos are out of scope for this repo/session; any wiring below is a novahub change.
+
+### The four sessions
+| Session | What | Status (snapshot) |
+|---|---|---|
+| `session_013KaA5oWtyQXtWULYd32wx7` | "LeadFuel Reports program" coordinator (Sonnet, parent of P5-F4). Runs one board task at a time; board = ArtifactData collection `tasks`. | Idle, ~113k ctx. Waiting on Novah: 6 open questions (R14 email vs briefing only; `SPOKE_PULL`/`SPOKE_SUBMIT_AUTHORITY`; `LOCAL_ZONE_STALE_HOURS=12`; P9 PDF lib + P8 DMARC rua; pin `tzfpy`; accept CI as the full-suite check), OK to archive two old sessions, and a decision on leadfuel-core PR #2 (stale `docs/REPORTS_PLAN.md`). Next: P5-F1 re-check, then P6. |
+| `session_01YRqpKWgtn1FCn1RkWoyMpN` | P5 "Prime digests all spokes, infers, shows time windows and what is missing". | Archived. Opened novahub PR #683 (`claude/p5-prime-digest`). Transcript not read in detail; whether #683 merged is **unverified** (the coordinator calls a separate session "the stray #683 merge session"). |
+| `session_01AqEe6LghcvzuWQHGmvaSFs` | P5-F2: wire R14 `relevance_questions(owner)` into the briefing as NEEDS YOU. | Done. PR #691 merged by Novah 2026-09-30, CI green. Session idle; archive awaits Novah's OK. |
+| `session_01E4SGoX7VSuJHKATRrcVsde` | P5-F4: "auto-archived N messages" line in the briefing. | Draft PR #692 open. pytest + pip-audit passed; the `gates` check was cancelled and one re-run was queued. Needs: gates green, Novah merge. Known gap: no undo route exists yet, the "Undo" link points at the list route `GET /api/inbound/manage/auto-archives?hours=48`. |
+
+### Overlap with the nightly routine (`trig_01U9CpzgkUWKbLeymJ46qmuA`, 03:07 UTC)
+- **Archive is not actually duplicated.** P5-F4's "auto-archive" is about **email messages** archived by
+  `mail_auto_archive` (novahub #684); it only *reports* them in the briefing. Routine step 2 archives **conductor
+  sessions** (Claude sessions) under strict eligibility. Different objects, same word. Recommendation: the **routine owns
+  session archiving** (it is the only thing with the eligibility rules and Novah's explicit approval); **P5-F4/novahub
+  owns the mail-archive line**. Rename the briefing line to "Mail auto-archived ..." to prevent confusion, and never let the
+  briefing archive sessions.
+- **Real overlap is the end-of-day report vs the briefing.** Both summarise "what happened / what needs you". The routine
+  writes `docs/reports/YYYY-MM-DD.md` (intent, done, worked, didn't, budget/spend, tasks/goals, archived, next, open
+  questions) to a draft PR that nobody reads by email. The briefing is the thing Novah reads daily. Keep one source of
+  truth per fact: the report is the record, the briefing shows a short digest plus a link.
+- Possible duplicate work: the coordinator's "archive two old sessions, ask Novah" step and the nightly routine's step 2.
+  Those two sessions are not tagged `conductor`, so the routine will skip them; they stay a manual Novah decision.
+- Session-budget numbers: report data (cost, context) comes from `get_session` in both places; do not build a second collector.
+
+### Where the nightly report plugs into the command book
+| Option | How | Pros | Cons / unverified |
+|---|---|---|---|
+| A. Brain document | Routine stores the report (short form) in the Novah brain (`store_document`); `command_book.compose` reads the latest one and adds a CONDUCTOR section | One email (decision A); report searchable by NovahPrime; no cross-repo file reads at runtime | Unverified: that `compose` can read brain documents internally; the routine currently has **no connectors** (`mcp_connections: []`), so it could not call the brain tool today |
+| B. Separate email | Routine mails the report | Trivial, no novahub change | Breaks "one email"; needs a mail connector; Novah asked for it in the command book |
+| C. File the generator reads | Briefing generator fetches `docs/reports/latest.md` from novahos on GitHub | No brain write | Railway-deployed novahub needs a GitHub token for novahos at runtime; PR is a draft on a side branch, so "latest" is not on main |
+
+**Recommendation: A.** Routine step 5 (new): store a ≤1.5k-char digest + link to the report PR as a brain document tagged
+`conductor_report`, date-keyed. novahub `compose` adds a fail-soft, quiet-when-absent CONDUCTOR block (HTML + text) with:
+done today, what didn't, spend vs budget, tasks/goals completed, next, and anything needing Novah, following the P5-F2/F4
+pattern (#691/#692). Fall back to C only if A cannot be done. Do not use B.
+
+Unverified: (1) brain tool/connector availability inside the routine's fresh sessions; (2) the document API available to
+`command_book.py`; (3) how `compose` is scheduled relative to the 03:07 UTC report (the 12:10 UTC briefing is later, so a
+same-day report is available); (4) whether #683 merged; (5) final status of #692 gates.
+
+### Next steps for the owning repo (novahub; nothing here was done by this session)
+1. Merge #692 once `gates` is green; add an undo route or relabel the link; rename the line to "Mail auto-archived".
+2. Decide A vs C with Novah (open question below). If A: confirm `compose` can read a brain document by tag.
+3. novahub: add a CONDUCTOR block in `command_book.compose` + HTML/text renderers + tests beside
+   `tests/test_command_book_auto_archives.py` (fail-soft, quiet when no report or report older than 36h).
+4. novahos: after step 2 of the conductor build order ships `report.py`, add a `digest()` that emits the short form; update
+   the routine (Novah's call) to add the connector and the store step. Not changed here.
+5. Resolve the Reports coordinator's pending asks (6 questions, two session archives, leadfuel-core PR #2) so the program has one
+   open owner.
+
+### Decisions (Novah, 2026-10-01)
+- **Wiring: option A (brain document), option C (GitHub file read) as backup** if A cannot be done (e.g. the routine cannot get the brain connector, or `compose` cannot read brain documents).
+- **Routine step 2 stays limited to `conductor`-tagged sessions.** The two Reports sessions are Novah's manual decision.
+- **Briefing shows both**: the full report is stored/available, and the CONDUCTOR block shows a digest plus link.
+- Still requires Novah to add the brain connector to the routine; not changed here.
+
+### Session completion contract (Novah, 2026-10-01)
+Every conductor/Reports session must say when it is done, or what comes next. No silent idle.
+The **last message of every turn that ends a task** starts with one status line, then the next steps:
+
+```
+STATUS: DONE | BLOCKED | NEEDS-NOVAH | CONTINUING
+PR: <url or none> · CI: <green/red/pending> · Context: <tokens>
+DONE: <1-3 bullets>
+NEXT: <the single next step, who does it (Novah / which session / routine)>
+QUESTIONS: <only what Novah must decide, or none>
+```
+Rules: DONE only when the PR is merged or the task needs nothing more; a draft PR waiting on review is `NEEDS-NOVAH` with
+the exact ask. The same block is written to the task's handoff note (`.conductor/handoffs/<task>.md` or the board task) so a
+fresh session and the nightly report can read it without the transcript. The block is now in the `handoff` and `route-and-spawn` skills. The board docs `TEMPLATE-child-brief`/`TEMPLATE-babysit-brief` live on the board, outside this repo: they still need the same block added (not changed here). The nightly report should list any session whose last message has no
+STATUS line as "no completion note" (proposed addition to the routine; Novah's call, routine not changed here).
 
 ## Handoff (build step 2)
 Done: `conductor/report.py` (`render(project, tasks, decisions=(), lessons=(), open_items=())`, `write_report(path, ...)`) and
@@ -161,3 +248,81 @@ so `auto_archive` now has a path to fire. Gotchas: imported sessions are matched
 - `.claude/hooks/context_guard.py` is copied into other repos so it cannot import `policy.py`: it keeps its own `SOFT_DEFAULT`/`HARD_DEFAULT` (300k/450k) and still reads `SESSION_SOFT_TOKENS` / `SESSION_HARD_TOKENS`; `tests/test_session_budget.py` fails if the two drift.
 - Stacked on #34 (CND-1), whose head it branches from. Max parallel: the code default is still 3 (`plan --max-parallel`); the owner's 8 is a routine/CLI setting, not changed here. Model routing is unchanged; the Sonnet/Haiku-only hold is lifted.
 - Gotchas: `.conductor/project.json` in this repo was moved to the new total budget (5M/8M); the old 100k/150k there was the project total, which the per-session meaning of #34 made wrong anyway. The context-guard hook still fired at the old 100k default while this was written, because the hook change is not merged yet.
+
+## Session taxonomy
+The owner works in LANES, shown as groups in the Claude app sidebar: ROUTER, SENSORS, DOORS, INTELLIGENCE, ARMS, NODE, SURFACE, LAB, MONEY,
+VAULT, SUITE, ROUNDTRIP, COMMS, FIELD, PRIVACY, PRODUCT, WATCH, MARKET, BRAIN, plus WEBSITES (website development). The app's groups are not
+exposed by the session API (rows carry only tags), so each session mirrors its lane as a tag, and its title is `<LANE> · <topic>`.
+Tags are only ever added by sweeps, except when the owner asks for a retag. Existing tags (`conductor`, `router`, `router:current`,
+`incarnation:N`, `remote-control-sdk`, `config:*`) stay.
+
+| tag | values | meaning |
+| --- | --- | --- |
+| `lane:<NAME>` | one of the lanes above | REQUIRED. The group the session belongs to. |
+| `role:<r>` | `router`, `conductor`, `task`, `watchdog`, `report`, `scratch` | REQUIRED. What kind of session it is. |
+| `project:<slug>` | `leadfuel-reports` | only for the LeadFuel completion plan (the conductor's `project.json` slug). Not a grouping. |
+| `task:<id>` | task id from tasks.json, or `s-<last 8 of session id>` for adopted sessions | task and scratch sessions that belong to a task |
+| `model:<m>` | `opus`, `sonnet`, `haiku` | model routed (short name) |
+
+LeadFuel completion tasks map to lanes: Reports tasks (P*, P5-F*) INTELLIGENCE; gateway tasks (G*, MERGE-3, MERGE-4) MONEY; conductor, kit and router
+tasks (CND-*, conductor-*, MERGE-2) ROUTER. Cost-control work (session-budget kit, API cost) is MONEY.
+
+Roles:
+- `router`: the one session the owner talks to (also keeps `router`, `router:current`, `incarnation:N`).
+- `conductor`: a long-lived or successor coordinator, or a conductor build session.
+- `task`: one task, one session, one PR.
+- `watchdog`: a routine-fired tick session (hourly tick, nightly close-out); lane ROUTER.
+- `report`: a session whose job is a report or briefing block.
+- `scratch`: smoke tests, throwaway pings, experiments. Never part of a plan.
+
+A session missing `lane:` or `role:` is "ungrouped"; the nightly close-out lists them (ids and titles in the private report, a count only in the
+public copy). Ticks do not list sessions: `list_sessions` is about 100KB.
+
+Archive gate (one rule, one owner). Archive only when ALL hold: (1) its PR is merged (state read in any NOVAHGREYWOLF repo; read-only),
+(2) its last message says `STATUS: DONE` (or "DONE"), (3) a handoff or final report exists, (4) it is idle, not a router, not the caller
+or its parent. The hourly tick archives plan tasks, through `python3 -m conductor.cloud mark-done` (`auto_archive` is on for project
+`leadfuel-reports`). The nightly close-out applies the same gate and skips already-archived sessions. No other archiver. `role:scratch`
+sessions and routers are archived only with the owner's yes.
+
+Reporting is pull-first. Children still send `STATUS:` via `mcp__claude-code-remote__send_message`, but ticks do not depend on it.
+The tick reads each task session's latest `STATUS: DONE|BLOCKED|NEEDS-NOVAH|CONTINUING` line from `list_events` (kinds assistant,result,
+limit 3). A session whose `post_turn_summary.status_detail` starts with "Waiting on permission" is `blocked`. Every child `create_session`
+passes `extra_allowed_tools: ["mcp__claude-code-remote__send_message"]` anyway (entries the spawner lacks are dropped).
+
+## Daily report contract
+Read by the command briefing in novahub (NOVAHGREYWOLF/novahub#697). Routine: "Conductor nightly", 20:07 PT. It stores TWO documents in
+the private Briefcase through the `novahub_brain` connector's `store_document`, plus a sanitized public copy in git.
+
+(a) Digest. name `conductor_report YYYY-MM-DD` (date in Pacific Time), kind `conductor_report`, source_app `conductor`,
+source_entity_id `YYYY-MM-DD`, source_entity_label `Conductor nightly report`. content = plain text, at most 1500 chars:
+
+```
+conductor_report YYYY-MM-DD (PT)
+STATUS: DONE|BLOCKED|NEEDS-NOVAH|CONTINUING
+DONE TODAY: <n>
+- <task id> | <title, 60 chars max> | <PR url>
+DID NOT WORK: <n>
+- <task id or session id> | <one line>
+SPEND: $<total> | <tokens> tokens | soft <s> hard <h> | ok|soft|hard
+TASKS: completed <a> / in progress <b> / blocked <c> / todo <d> | GOALS <x>/<y>
+ARCHIVED: <ids or none>
+NEXT:
+- <task id>: <one line, who decides>
+NEEDS NOVAH:
+- <item> (or "nothing")
+REPORT: <public report PR url, or "no PR">
+FULL: conductor_report_full YYYY-MM-DD
+```
+
+(b) Full report. name `conductor_report_full YYYY-MM-DD`, kind `conductor_report_full`, source_app `conductor`, same source_entity_id.
+content = the private markdown report with sections: Intent; Done today; What worked; What did not; No completion note;
+Budget vs spend; Tasks and goals; Archived tonight; Next; Open questions for Novah.
+
+A new document is stored each day; a rerun the same day passes `supersedes_id` of the earlier row. Freshness for readers is the
+`created_at` of the newest non-superseded row. Readers query `list_documents(app="conductor", kind="conductor_report")` and never scan the
+whole Briefcase (500+ documents, mostly lucid facts).
+
+Public/private split. The digest and the full report are private (Briefcase). The git copy is public: `docs/reports/YYYY-MM-DD.md` in
+novahos, on branch `claude/nightly-report-YYYY-MM-DD`, draft PR to main. It has the same sections as the full report with: no dollar
+amounts, no token counts, "Budget vs spend" = one line `budget status: ok|soft|hard`, "Open questions for Novah" = "see the private report".
+Public repos get ids, titles, status, PR numbers and counts only: no secrets, no emails, no spend, no private details.

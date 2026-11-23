@@ -26,6 +26,7 @@ import tempfile
 from pathlib import Path
 
 # Standalone (copied into other repos), so no import; tests/test_session_budget.py keeps these equal to conductor/policy.py.
+# Owner policy 2026-10-01: soft 300k, hard 450k.
 SOFT_DEFAULT = 300_000
 HARD_DEFAULT = 450_000
 TAIL_BYTES = 768 * 1024

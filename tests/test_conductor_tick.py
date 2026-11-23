@@ -32,6 +32,16 @@ def test_reuse_below_200k_fresh_otherwise():
     acts = tick(State(p, tasks, max_parallel=5))
     assert kinds(acts) == [("start_reuse", "a"), ("start_fresh", "b"), ("start_fresh", "c")]
     assert acts[0].session_id == "s1" and acts[1].session_id is None
+    assert "200000" in acts[1].reason
+
+
+def test_haiku_reuse_below_150k():
+    tasks = [T("a", model="haiku", session_id="s1", context_tokens=149_999),
+             T("b", model="haiku", session_id="s2", context_tokens=150_000),
+             T("c", model="sonnet", session_id="s3", context_tokens=150_000)]
+    acts = tick(State(P(soft=10**9, hard=10**9), tasks, max_parallel=5))
+    assert kinds(acts) == [("start_reuse", "a"), ("start_fresh", "b"), ("start_reuse", "c")]
+    assert "150000" in acts[1].reason
 
 
 def test_archive_never_unless_auto_archive():
