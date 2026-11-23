@@ -155,3 +155,15 @@ Rules: DONE only when the PR is merged or the task needs nothing more; a draft P
 the exact ask. The same block is written to the task's handoff note (`.conductor/handoffs/<task>.md` or the board task) so a
 fresh session and the nightly report can read it without the transcript. The block is now in the `handoff` and `route-and-spawn` skills. The board docs `TEMPLATE-child-brief`/`TEMPLATE-babysit-brief` live on the board, outside this repo: they still need the same block added (not changed here). The nightly report should list any session whose last message has no
 STATUS line as "no completion note" (proposed addition to the routine; Novah's call, routine not changed here).
+
+## Handoff (build step 2)
+Done: `conductor/report.py` (`render(project, tasks, decisions=(), lessons=(), open_items=())`, `write_report(path, ...)`) and
+`tests/test_conductor_report.py` with golden `tests/fixtures/conductor_report.md` (empty, all statuses, over soft/hard budget,
+auto_archive on/off). Stdlib only, no timestamps. Draft PR stacked on #26 (base `claude/conductor-plan`); retarget to main once #26 merges.
+Next: step 3, `tick()` pure function + tests (ready-task selection via `plan.ready_tasks`, reuse vs fresh session, archive policy, budget stop).
+Gotchas:
+- `Budget.soft/hard` are compared with the sum of `Task.context_tokens` (tokens); `cost_usd` is reported but not budgeted. Tick's budget stop should use the same measure.
+- Archive candidates = `done` + `session_id`; with `auto_archive` false they are listed only. `tick()` should reuse that rule, not redo it.
+- Blocked tasks are auto-added to "Open items"; tasks without a model group under `unassigned`.
+- Regenerate the golden by deleting the fixture and running the test once (it writes it when missing); review the diff.
+- Cost numbers use `$x,xxx.xx` and tokens `x,xxx`; changing formats means regenerating the golden.
