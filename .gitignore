@@ -24,3 +24,5 @@ Thumbs.db
 
 # Conductor full briefs may hold private details; a public repo must not track them
 .conductor/briefs/
+# The pick bridge writes task titles and owner text from the owner's queue; never track its skipped list
+.conductor/picks-skipped.json

@@ -63,7 +63,8 @@ def _generic_brief(task: Task) -> str:
             f"One task, one session, one PR (draft). Read docs/ and the handoff section first. Budget: handoff at "
             f"{policy.SESSION_SOFT // 1000}k tokens, hard stop {policy.SESSION_HARD // 1000}k.{haiku} "
             "No polling, no wake-ups, never archive sessions, never force-push. "
-            "Write a short handoff and stop when done or blocked.")
+            "Write a short handoff and stop when done or blocked."
+            + (f"\n\n{task.brief}" if task.brief else ""))
 
 
 def plan_tick(cdir: Path, repo_url: str, revision: str = "main", max_parallel: int = 3, claim: bool = True,

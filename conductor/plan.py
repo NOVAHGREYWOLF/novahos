@@ -62,6 +62,7 @@ class Task:
     context_tokens: int = 0
     adopted: bool = False  # picked up by `import`; never counts against max_parallel
     lane: str | None = None  # overrides the project's default lane
+    brief: str | None = None  # full task text for the session; prompts append it when set
 
 
 def lane_error(lane: Any, where: str) -> str | None:
@@ -137,8 +138,9 @@ def load_tasks(path: str | Path) -> list[Task]:
 def _plain(obj: Project | Task) -> dict[str, Any]:
     """asdict, minus an unset lane and a false `adopted`, so files that never used them stay byte-identical."""
     d = asdict(obj)
-    if d.get("lane") is None:
-        d.pop("lane", None)
+    for optional in ("lane", "brief"):
+        if d.get(optional) is None:
+            d.pop(optional, None)
     if d.get("adopted") is False:
         d.pop("adopted", None)
     return d
