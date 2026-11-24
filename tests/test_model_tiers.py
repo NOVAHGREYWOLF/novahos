@@ -64,7 +64,7 @@ def test_the_map_cannot_be_mutated_at_runtime():
 @pytest.mark.parametrize("app_id,tier", [
     ("claude-sonnet-4-5", "write"),     # reach, scope
     ("claude-sonnet-4-6", "write"),     # signal
-    ("claude-haiku-4-5", "classify"),   # scope — already current
+    ("claude-haiku-4-5", "classify"),   # scope; the classify tier until haiku-5-5
     ("claude-haiku-3-5", "classify"),   # odyssey — not a valid ID
     ("claude-opus-4-8", "reason"),      # lucid
 ])
@@ -82,6 +82,32 @@ def test_tier_for_round_trips_current_ids():
     for tier, model in TIERS.items():
         assert tier_for(model) == tier
         assert is_current(model)
+
+
+def test_the_tiers_name_the_current_generation():
+    """The hub's copy (novahub `model_tiers.py`) says the same three ids; its test compares
+    the two once the hub's novahos pin includes this file. Change both together."""
+    assert dict(TIERS) == {
+        "reason": "claude-opus-5-5",
+        "write": "claude-sonnet-5-5",
+        "classify": "claude-haiku-5-5",
+    }
+
+
+def test_the_previous_classify_id_is_legacy_not_current():
+    assert tier_for("claude-haiku-4-5") == "classify"
+    assert not is_current("claude-haiku-4-5")
+
+
+def test_route_and_spawn_fallback_matches_the_map():
+    """route.py names ids only for when the kernel is not importable. They must say the same."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1]
+           / ".claude" / "skills" / "route-and-spawn" / "route.py").read_text(encoding="utf-8")
+    found = re.search(r'IDS = \{"opus": "([^"]+)", "sonnet": "([^"]+)", "haiku": "([^"]+)"\}', src)
+    assert found, "route.py fallback IDS literal not found: this check cannot see its subject"
+    assert found.groups() == (TIERS["reason"], TIERS["write"], TIERS["classify"])
 
 
 def test_unknown_ids_have_no_tier():
