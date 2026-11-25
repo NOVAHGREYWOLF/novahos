@@ -11,8 +11,20 @@ paths, then calls `parse_backup({name: path, ...})`. Each parser is defensive: a
 a schema that shifted across iOS versions yields [] rather than raising, so a partial backup still
 produces what it can.
 
-Privacy: items are emitted with truthful `type`s (message/contact/call/event). How they're stored
-(vectorized vs withheld, encrypted at rest) is the APP's ingest decision, not the parser's.
+The companion that fits this contract exactly is `ios-backup-core`
+(github.com/charleswest775/ios-backup-core, MIT), whose
+`LocalBackupAccessor.get_file(relative_path, domain=...)` takes the same (domain, relativePath)
+pair KNOWN_FILES stores and returns a decrypted path. It sits on `iphone-backup-decrypt` →
+`pycryptodome` for the keybag crypto. The OpenExtract desktop APP is built on that same library
+but is NOT itself a usable companion: it is an Electron GUI whose only exports are rendered
+txt/csv/html/pdf, and it never hands out the raw SQLite. See home-node/21-The-Phone.md.
+
+Privacy: items are emitted with truthful `type`s (message/contact/call/event/note) AND stamped
+`meta["privacy_tier"] = LOCAL_ONLY`. A phone backup is the contents of someone's pocket; under a
+one-brain-many-nodes design where `private` replicates to every node INCLUDING a rented cloud one,
+"private" is not a strong enough claim. LOCAL_ONLY is the tier that never leaves this machine.
+The stamp is per ITEM rather than by source name because "contacts"/"calendar" are generic words
+other connectors legitimately use — only the phone path should be pinned this tightly.
 """
 from __future__ import annotations
 
@@ -20,6 +32,7 @@ import contextlib
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from ..privacy import LOCAL_ONLY
 from .base import RawItem
 
 # logical name -> (domain, relativePath) the companion extracts from the backup
@@ -28,8 +41,12 @@ KNOWN_FILES: dict[str, tuple[str, str]] = {
     "contacts": ("HomeDomain", "Library/AddressBook/AddressBook.sqlitedb"),
     "calls": ("HomeDomain", "Library/CallHistoryDB/CallHistory.storedata"),
     "calendar": ("HomeDomain", "Library/Calendar/Calendar.sqlitedb"),
-    # refined against a real backup later (protobuf / binary schemas):
-    # "notes":  ("AppDomainGroup-group.com.apple.notes", "NoteStore.sqlite"),
+    "notes": ("AppDomainGroup-group.com.apple.notes", "NoteStore.sqlite"),
+    # STILL commented, deliberately. healthdb_secure.sqlite keys every row to an INTEGER
+    # `data_type` in SAMPLES/QUANTITY_SAMPLES whose meaning is an undocumented enum that Apple
+    # renumbers across iOS versions. Guessing it yields rows that look right and mean something
+    # else — a heart rate read as a step count. That is worse than no health ingest, so it waits
+    # for a real backup to verify against.
     # "health": ("HealthDomain", "Health/healthdb_secure.sqlite"),
 }
 
@@ -64,6 +81,25 @@ def _rows(path: str, sql: str) -> list[sqlite3.Row]:
             con.close()
     except Exception:
         return []
+
+
+def _columns(path: str, table: str) -> set[str]:
+    """The columns a table ACTUALLY has. Apple renames columns across iOS versions (Notes is the
+    worst offender: ZTITLE1 vs ZTITLE2 vs ZTITLE), so a hardcoded SELECT breaks on half the
+    backups in existence. Probing lets one parser span versions and return [] rather than guess."""
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            return {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        finally:
+            con.close()
+    except Exception:
+        return set()
+
+
+def _first(available: set[str], *candidates: str) -> str | None:
+    """First candidate column name that exists, else None."""
+    return next((c for c in candidates if c in available), None)
 
 
 def parse_messages(path: str) -> list[RawItem]:
@@ -140,20 +176,98 @@ def parse_calendar(path: str) -> list[RawItem]:
     return out
 
 
+def parse_notes(path: str) -> list[RawItem]:
+    """Apple Notes — TITLES, PREVIEWS and DATES only. The note BODY is deliberately not read.
+
+    NoteStore.sqlite (iOS 9+) splits a note in two:
+
+      * ``ZICCLOUDSYNCINGOBJECT`` — a Core Data table holding the title, a plaintext preview
+        (``ZSNIPPET``), the folder, and creation/modification dates. All ordinary SQLite columns.
+      * ``ZICNOTEDATA.ZDATA``    — the note body, stored as a **gzipped protobuf**.
+
+    We read the first and NOT the second. Un-gzipping ZDATA is trivial, but what comes out is a
+    protobuf whose field numbering Apple has never published and does change between iOS
+    releases. The usual workaround (decompress, then regex printable runs out of the bytes)
+    recovers text that is *mostly* right and silently wrong at every attachment, table, checklist
+    and formatting run — it drops content without saying so and interleaves struct bytes into
+    prose. A parser that returns subtly wrong notes is worse than one that returns titles, so the
+    body waits for a verified schema.
+
+    Titles and snippets are worth having on their own: "Passport renewal", "Offer numbers for
+    Tuesday" carry real signal, and ZSNIPPET is a genuine plaintext lead-in to the body.
+
+    Column names are probed (see `_columns`) rather than assumed, so a version whose columns
+    differ yields [] instead of an exception or a wrong read.
+    """
+    cols = _columns(path, "ZICCLOUDSYNCINGOBJECT")
+    if not cols:
+        return []
+    # Apple's Core Data numbering suffix shifts with the model version.
+    title_c = _first(cols, "ZTITLE1", "ZTITLE2", "ZTITLE")
+    if not title_c:
+        return []
+    snip_c = _first(cols, "ZSNIPPET")
+    made_c = _first(cols, "ZCREATIONDATE1", "ZCREATIONDATE", "ZCREATIONDATE2")
+    edit_c = _first(cols, "ZMODIFICATIONDATE1", "ZMODIFICATIONDATE", "ZMODIFICATIONDATE2")
+    del_c = _first(cols, "ZMARKEDFORDELETION")
+    note_c = _first(cols, "ZNOTEDATA")
+
+    sel = ["Z_PK AS pk", f"{title_c} AS title"]
+    sel.append(f"{snip_c} AS snippet" if snip_c else "NULL AS snippet")
+    sel.append(f"{made_c} AS made" if made_c else "NULL AS made")
+    sel.append(f"{edit_c} AS edited" if edit_c else "NULL AS edited")
+    # A note row has ZNOTEDATA set; folders/attachments live in the same table without it, so
+    # this is what separates real notes from the rest of the Core Data soup.
+    where = [f"{title_c} IS NOT NULL", f"length(trim({title_c})) > 0"]
+    if del_c:
+        where.append(f"({del_c} IS NULL OR {del_c} = 0)")
+    if note_c:
+        where.append(f"{note_c} IS NOT NULL")
+    order = f"ORDER BY {edit_c} DESC" if edit_c else ""
+    sql = (f"SELECT {', '.join(sel)} FROM ZICCLOUDSYNCINGOBJECT "
+           f"WHERE {' AND '.join(where)} {order} LIMIT {MAX_PER_KIND}")
+
+    out: list[RawItem] = []
+    for r in _rows(path, sql):
+        title = (r["title"] or "").strip()
+        if not title:
+            continue
+        snippet = (r["snippet"] or "").strip() if r["snippet"] else ""
+        ts = _apple_ts(r["edited"]) or _apple_ts(r["made"])
+        out.append(RawItem(
+            source="notes", type="note", title=title,
+            content=(title + "\n" + snippet).strip() if snippet else title,
+            ts=ts, domain="personal", dedup_key=f"note:{r['pk']}",
+            # body_included=False is the honest signal to the app: this is a title/preview, not
+            # the note. An app that later gets a real body parser can re-ingest on this flag.
+            meta={"body_included": False, "created": _apple_ts(r["made"])},
+        ))
+    return out
+
+
 _PARSERS = {
     "messages": parse_messages,
     "contacts": parse_contacts,
     "calls": parse_calls,
     "calendar": parse_calendar,
+    "notes": parse_notes,
 }
 
 
 def parse_backup(extracted: dict[str, str]) -> list[RawItem]:
-    """extracted: {logical_name: path_to_extracted_sqlite}. Returns all RawItems it can read."""
+    """extracted: {logical_name: path_to_extracted_sqlite}. Returns all RawItems it can read.
+
+    Every item is stamped ``meta["privacy_tier"] = LOCAL_ONLY`` before it is returned. This is
+    done HERE, once, at the single exit of the module, rather than in each parser — a per-parser
+    stamp is one `return` away from being forgotten by the next parser somebody adds, and the
+    failure mode of forgetting is a person's messages replicating to a rented machine.
+    """
     items: list[RawItem] = []
     for name, path in (extracted or {}).items():
         parser = _PARSERS.get(name)
         if parser and path:
             with contextlib.suppress(Exception):
                 items.extend(parser(path))
+    for it in items:
+        it.meta["privacy_tier"] = LOCAL_ONLY
     return items
