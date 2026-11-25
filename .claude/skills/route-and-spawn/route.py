@@ -29,7 +29,7 @@ try:  # one place for model IDs, when the kernel is installed
 
     IDS = {"opus": model_for("reason"), "sonnet": model_for("write"), "haiku": model_for("classify")}
 except Exception:  # noqa: BLE001
-    IDS = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-4-5"}
+    IDS = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
 OPUS_ENVELOPES = {"critical", "door"}
 OPUS_EFFORT = {"high", "xhigh"}

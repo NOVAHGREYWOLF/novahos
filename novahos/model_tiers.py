@@ -38,7 +38,7 @@ from types import MappingProxyType
 TIERS: Mapping[str, str] = MappingProxyType({
     "reason": "claude-opus-5-5",
     "write": "claude-sonnet-5-5",
-    "classify": "claude-haiku-4-5",
+    "classify": "claude-haiku-5-5",
 })
 
 #: IDs apps were found using, and the tier each one should move to. Lets a host (or a check in
@@ -48,6 +48,7 @@ LEGACY_IDS: Mapping[str, str] = MappingProxyType({
     "claude-opus-4-8": "reason",
     "claude-sonnet-4-6": "write",
     "claude-sonnet-4-5": "write",
+    "claude-haiku-4-5": "classify",           # was the classify tier until haiku-5-5 (ARMS 226)
     "claude-haiku-4-5-20251001": "classify",
     "claude-haiku-3-5": "classify",          # invalid ID (odyssey)
     "claude-3-5-haiku-20241022": "classify",  # retired 2026-02-19
